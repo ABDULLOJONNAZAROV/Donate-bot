@@ -470,4 +470,65 @@ async def cb_my_orders(c: CallbackQuery):
             text += f"{icon} {o['oid']} · {o['title']} · {o['price']} с.\n"
     rows = [[InlineKeyboardButton(text="🔄 Навсозӣ", callback_data="my_orders")],
             [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
-    await c.message.edit_text(text, rep
+    await c.message.edit_text(text, reply_markup=kb(rows))
+    await c.answer()
+
+@dp.callback_query(F.data == "support")
+async def cb_support(c: CallbackQuery):
+    rows = [[InlineKeyboardButton(text="💬 Навиштан ба дастгирӣ", url="https://t.me/donatix_support")],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
+    await c.message.edit_text("🛟 Дастгирӣ\n\nНависед, чӣ рух дод — скриншот, чек ё овозӣ. "
+                              "Мо ҷавоб медиҳем.", reply_markup=kb(rows))
+    await c.answer()
+
+@dp.callback_query(F.data == "tg_stars")
+async def cb_stars(c: CallbackQuery):
+    rows = [[InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
+    await c.message.edit_text("⭐ Telegram Stars / Premium\n\nБа зудӣ! Ҳоло алмос ва UC дастрас аст.",
+                              reply_markup=kb(rows))
+    await c.answer()
+
+@dp.message(F.text)
+async def text_handler(m: Message):
+    st = user_state.get(m.from_user.id)
+    if not st:
+        return
+    if st.get("stage") == "waiting_id" and m.text.strip().isdigit() and 6 <= len(m.text.strip()) <= 15:
+        product = st["product"]
+        pid = m.text.strip()
+        rows = [[InlineKeyboardButton(text="✅ Тасдиқ", callback_data=f"cfm:{product['product_id']}:{pid}"),
+                 InlineKeyboardButton(text="❌ Бекор", callback_data="cancel")]]
+        await m.answer(f"✅ Тасдиқ кунед:\n\n📦 {product.get('title') or product.get('name')}\n"
+                       f"🆔 ID: {pid}\n💰 {product['price_tjs']} с.", reply_markup=kb(rows))
+    elif st.get("stage") == "topup_custom" and m.text.strip().isdigit():
+        mk = st.get("method", "card")
+        user_state.pop(m.from_user.id, None)
+        await start_topup(m, m.from_user.id, float(m.text.strip()), mk)
+
+async def health(_):
+    return web.Response(text="OK")
+
+async def keep_alive():
+    if not EXTERNAL_URL:
+        return
+    async with aiohttp.ClientSession() as s:
+        while True:
+            await asyncio.sleep(600)
+            try:
+                async with s.get(EXTERNAL_URL, timeout=aiohttp.ClientTimeout(total=60)) as r:
+                    await r.text()
+            except Exception:
+                pass
+
+async def main():
+    app = web.Application()
+    app.router.add_get("/", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    asyncio.create_task(keep_alive())
+    print("🚀 Магазин запущен")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
