@@ -206,20 +206,18 @@ async def cb_game(c: CallbackQuery):
     await load_catalog()
     found = None
     for cid, g in catalog.items():
-        n = g["name"].lower()
-        if game == "ff_cis" and ("free fire" in n or "ff" in n) and ("cis" in n or "снг" in n):
+        hay = (cid + " " + g["name"]).lower().replace("_", " ")
+        if game == "ff_cis" and ("free fire" in hay) and ("cis" in hay or "снг" in hay) and "indon" not in hay:
             found = cid; break
-        if game == "ff_id" and ("free fire" in n or "ff" in n) and ("indon" in n or "индон" in n):
+        if game == "ff_id" and ("free fire" in hay) and "indon" in hay:
             found = cid; break
-        if game == "pubg" and "pubg" in n:
+        if game == "pubg" and "pubg" in hay:
             found = cid; break
     if found:
         await show_category(c, found)
     else:
-        names = ", ".join(g["name"] for g in list(catalog.values())[:8])
-        await c.answer(f"Ёфт нашуд. Ҳаст: {names}", show_alert=True)
-
-@dp.callback_query(F.data.startswith("cat:"))
+        debug = "\n".join(f"{cid} = {g['name']}" for cid, g in list(catalog.items())[:12])
+        await c.answer(f"Ёфт нашуд 👇\n{debug}", show_alert=True)@dp.callback_query(F.data.startswith("cat:"))
 async def cb_cat(c: CallbackQuery):
     await show_category(c, c.data.split(":")[1])
 
