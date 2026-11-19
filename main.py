@@ -838,7 +838,7 @@ async def text_handler(m):
                 await bot.send_message(i, txt)
                 ok += 1
             except Exception:
-                pass
+              pass
             await asyncio.sleep(0.05)
         await m.answer(f"✅ Расонида шуд: {ok}/{len(ids)}")
 
@@ -848,6 +848,7 @@ async def cb_cancel(c):
     user_state.pop(c.from_user.id, None)
     await edit_or_send(c.message, t(c.from_user.id, "cancelled"))
     await c.answer()
+
 
 # ===================== Заказы =====================
 async def ask_confirm(m, uid, title, target, base, cost_usd, body):
@@ -1269,7 +1270,7 @@ async def cb_adr(c):
     if k in db["users"]:
         db["users"][k]["balance"] = 0.0
         save_db()
-      await c.answer("Баланс = 0")
+    await c.answer("Баланс = 0")
     await show_user_card(c, k)
 
 
