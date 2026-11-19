@@ -16,11 +16,24 @@ from aiogram.types import (Message, CallbackQuery,
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 DONATIX_KEY = os.environ.get("DONATIX_KEY", "")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
-CARD_NUMBER = os.environ.get("CARD_NUMBER", "6222 0000 0000 0000")  # твоя карта для пополнений
-CARD_HOLDER = os.environ.get("CARD_HOLDER", "Номи шумо")           # имя на карте
-MARGIN = float(os.environ.get("MARGIN", "0.15"))                   # наценка 15%
+MARGIN = float(os.environ.get("MARGIN", "0.15"))
 PORT = int(os.environ.get("PORT", 10000))
 EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
+
+# ===== Способы пополнения (разные номера) =====
+PAY_METHODS = {}
+if os.environ.get("DC_NUMBER"):
+    PAY_METHODS["dc"] = {"title": "🏙 Душанбе Сити",
+                         "number": os.environ["DC_NUMBER"],
+                         "holder": os.environ.get("DC_HOLDER", "")}
+if os.environ.get("ALIF_NUMBER"):
+    PAY_METHODS["alif"] = {"title": "🏦 Алиф",
+                           "number": os.environ["ALIF_NUMBER"],
+                           "holder": os.environ.get("ALIF_HOLDER", "")}
+if not PAY_METHODS and os.environ.get("CARD_NUMBER"):
+    PAY_METHODS["card"] = {"title": "💳 Корт",
+                           "number": os.environ["CARD_NUMBER"],
+                           "holder": os.environ.get("CARD_HOLDER", "")}
 
 API = "https://donatix.tj/api/v1"
 HEADERS = {"X-API-Key": DONATIX_KEY}
@@ -310,41 +323,60 @@ async def cb_confirm(c: CallbackQuery):
     except Exception as e:
         await c.message.answer(f"⚠️ Хатоӣ: {e}")
 
-# ===== Пополнение баланса =====
+# ===== Пополнение: выбор способа → сумма → реквизиты =====
 @dp.callback_query(F.data == "topup")
 async def cb_topup(c: CallbackQuery):
+    if not PAY_METHODS:
+        await c.answer("⚠️ Рақамҳо барои пур кардан танзим нашудаанд (Render → Environment)",
+                       show_alert=True)
+        return
+    rows = [[InlineKeyboardButton(text=m["title"], callback_data=f"tm:{key}")]
+            for key, m in PAY_METHODS.items()]
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu")])
+    await c.message.answer("💳 Усули пардохтро интихоб кунед:", reply_markup=kb(rows))
+    await c.answer()
+
+@dp.callback_query(F.data.startswith("tm:"))
+async def cb_method(c: CallbackQuery):
+    mk = c.data.split(":")[1]
+    if mk not in PAY_METHODS:
+        await c.answer("Ёфт нашуд", show_alert=True); return
     rows = [
-        [InlineKeyboardButton(text="10 с.", callback_data="tamt:10"),
-         InlineKeyboardButton(text="20 с.", callback_data="tamt:20"),
-         InlineKeyboardButton(text="50 с.", callback_data="tamt:50")],
-        [InlineKeyboardButton(text="100 с.", callback_data="tamt:100"),
-         InlineKeyboardButton(text="200 с.", callback_data="tamt:200"),
-         InlineKeyboardButton(text="✏️ Дигар", callback_data="tamt:custom")],
-        [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")],
+        [InlineKeyboardButton(text="10 с.", callback_data=f"tamt:10:{mk}"),
+         InlineKeyboardButton(text="20 с.", callback_data=f"tamt:20:{mk}"),
+         InlineKeyboardButton(text="50 с.", callback_data=f"tamt:50:{mk}")],
+        [InlineKeyboardButton(text="100 с.", callback_data=f"tamt:100:{mk}"),
+         InlineKeyboardButton(text="200 с.", callback_data=f"tamt:200:{mk}"),
+         InlineKeyboardButton(text="✏️ Дигар", callback_data=f"tamt:custom:{mk}")],
+        [InlineKeyboardButton(text="‹ Бозгашт", callback_data="topup")],
     ]
-    await c.message.answer("💳 Миқдори пуркуниро интихоб кунед:", reply_markup=kb(rows))
+    await c.message.edit_text(f"{PAY_METHODS[mk]['title']} — миқдорро интихоб кунед:",
+                              reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("tamt:"))
 async def cb_topup_amount(c: CallbackQuery):
-    v = c.data.split(":")[1]
+    _, v, mk = c.data.split(":")
+    if mk not in PAY_METHODS:
+        await c.answer("Ёфт нашуд", show_alert=True); return
     if v == "custom":
-        user_state[c.from_user.id] = {"stage": "topup_custom"}
+        user_state[c.from_user.id] = {"stage": "topup_custom", "method": mk}
         await c.message.answer("✏️ Миқдорро бо рақам нависед (масалан 35):")
         await c.answer(); return
-    await start_topup(c, float(v))
+    await start_topup(c.message, c.from_user.id, float(v), mk)
     await c.answer()
 
-async def start_topup(c: CallbackQuery, amount: float):
+async def start_topup(msg: Message, uid: int, amount: float, mk: str):
+    pm = PAY_METHODS[mk]
     tid = uuid.uuid4().hex[:8]
-    db["topups"][tid] = {"uid": c.from_user.id, "amount": amount, "status": "pending"}
+    db["topups"][tid] = {"uid": uid, "amount": amount, "method": mk, "status": "pending"}
     save_db()
-    user_state[c.from_user.id] = {"stage": "receipt", "tid": tid}
-    await c.message.answer(f"💳 Барои пур кардан:\n\n"
-                           f"1️⃣ Ба корт гузаронед: <code>{CARD_NUMBER}</code>\n"
-                           f"👤 {CARD_HOLDER}\n"
-                           f"💵 Миқдор: {amount:.2f} с.\n\n"
-                           f"2️⃣ Чек (акс)-ро ба ҳамин чат фиристед 📸", parse_mode="HTML")
+    user_state[uid] = {"stage": "receipt", "tid": tid}
+    holder = f"\n👤 {pm['holder']}" if pm["holder"] else ""
+    await msg.answer(f"💳 {pm['title']} — барои пур кардан:\n\n"
+                     f"1️⃣ Ба ин рақам гузаронед: <code>{pm['number']}</code>{holder}\n"
+                     f"💵 Миқдор: {amount:.2f} с.\n\n"
+                     f"2️⃣ Чек (акс)-ро ба ҳамин чат фиристед 📸", parse_mode="HTML")
 
 @dp.message(F.photo)
 async def got_receipt(m: Message):
@@ -358,12 +390,13 @@ async def got_receipt(m: Message):
     user_state.pop(m.from_user.id, None)
     if ADMIN_ID:
         await bot.copy_message(ADMIN_ID, m.chat.id, m.message_id)
+        mtitle = PAY_METHODS.get(topup.get("method", ""), {}).get("title", "💳")
         await bot.send_message(ADMIN_ID,
             f"🧾 Чеки нав!\n👤 {m.from_user.full_name} (ID {m.from_user.id})\n"
-            f"💵 {topup['amount']:.2f} с. (чек {tid})",
+            f"💵 {topup['amount']:.2f} с. · {mtitle} (чек {tid})",
             reply_markup=kb([[InlineKeyboardButton(text="✅ Тасдиқ", callback_data=f"tok:{tid}"),
                               InlineKeyboardButton(text="❌ Рад", callback_data=f"tno:{tid}")]]))
-        await m.answer("✅ Чек қабул шуд! Интизори тасдиқ бошед (одатан зуд).")
+        await m.answer("✅ Чек қабул шуд! Интизори тасдиқ бошед.")
     else:
         await m.answer("⚠️ Админ танзим нашудааст (ADMIN_ID).")
 
@@ -416,7 +449,6 @@ async def cb_balance(c: CallbackQuery):
 @dp.callback_query(F.data == "my_orders")
 async def cb_my_orders(c: CallbackQuery):
     u = get_user(c.from_user.id, c.from_user.full_name or "")
-    # обновляем статусы последних заказов
     if DONATIX_KEY:
         async with aiohttp.ClientSession() as s:
             for o in u["orders"][-8:]:
@@ -438,35 +470,4 @@ async def cb_my_orders(c: CallbackQuery):
             text += f"{icon} {o['oid']} · {o['title']} · {o['price']} с.\n"
     rows = [[InlineKeyboardButton(text="🔄 Навсозӣ", callback_data="my_orders")],
             [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
-    await c.message.edit_text(text, reply_markup=kb(rows))
-    await c.answer()
-
-@dp.callback_query(F.data == "support")
-async def cb_support(c: CallbackQuery):
-    rows = [[InlineKeyboardButton(text="💬 Навиштан ба дастгирӣ", url="https://t.me/donatix_support")],
-            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
-    await c.message.edit_text("🛟 Дастгирӣ\n\nНависед, чӣ рух дод — скриншот, чек ё овозӣ. "
-                              "Мо ҷавоб медиҳем.", reply_markup=kb(rows))
-    await c.answer()
-
-@dp.callback_query(F.data == "tg_stars")
-async def cb_stars(c: CallbackQuery):
-    rows = [[InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
-    await c.message.edit_text("⭐ Telegram Stars / Premium\n\nБа зудӣ! Ҳоло алмос ва UC дастрас аст.",
-                              reply_markup=kb(rows))
-    await c.answer()
-
-# ===== Ввод текста =====
-@dp.message(F.text)
-async def text_handler(m: Message):
-    st = user_state.get(m.from_user.id)
-    if not st:
-        return
-    if st.get("stage") == "waiting_id" and m.text.strip().isdigit() and 6 <= len(m.text.strip()) <= 15:
-        product = st["product"]
-        pid = m.text.strip()
-        rows = [[InlineKeyboardButton(text="✅ Тасдиқ", callback_data=f"cfm:{product['product_id']}:{pid}"),
-                 InlineKeyboardButton(text="❌ Бекор", callback_data="cancel")]]
-        await m.answer(f"✅ Тасдиқ кунед:\n\n📦 {product.get('title') or product.get('name')}\n"
-                       f"🆔 ID: {pid}\n💰 {product['price_tjs']} с.", reply_markup=kb(rows))
-    elif st.get("stage") == "topup_custom
+    await c.message.edit_text(text, rep
