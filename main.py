@@ -418,5 +418,8 @@ async def cb_admin_show(m):
              InlineKeyboardButton(text=f"🧾 Чеки нав ({pending})", callback_data="adm_pending")],
             [InlineKeyboardButton(text="📦 Фармоишҳо", callback_data="adm_orders")],
             [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
-    await m.answer(f"🛠 Панели админ\n👥 Харидорон: {len(db['users'])}\n"
-                   f"💰 Ҳамаи балансҳо
+    msg = "🛠 Панели админ\n"
+    msg += f"👥 Харидорон: {len(db['users'])}\n"
+    msg += f"💰 Ҳамаи балансҳо: {total_bal:.2f} с.\n"
+    msg += f"📊 Курс: 1 USD = {usd_tjs:.2f} TJS"
+    await m.answer(msg, reply_markup=kb(rows))
