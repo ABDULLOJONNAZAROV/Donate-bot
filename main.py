@@ -2,7 +2,8 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime
+import uuid
+from pathlib import Path
 
 import aiohttp
 from aiohttp import web
@@ -15,9 +16,11 @@ from aiogram.types import (Message, CallbackQuery,
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 DONATIX_KEY = os.environ.get("DONATIX_KEY", "")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
+CARD_NUMBER = os.environ.get("CARD_NUMBER", "6222 0000 0000 0000")  # твоя карта для пополнений
+CARD_HOLDER = os.environ.get("CARD_HOLDER", "Номи шумо")           # имя на карте
+MARGIN = float(os.environ.get("MARGIN", "0.15"))                   # наценка 15%
 PORT = int(os.environ.get("PORT", 10000))
 EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "")
-MARGIN = float(os.environ.get("MARGIN", "0.15"))  # наценка 15% (меняй как хочешь)
 
 API = "https://donatix.tj/api/v1"
 HEADERS = {"X-API-Key": DONATIX_KEY}
@@ -25,76 +28,91 @@ HEADERS = {"X-API-Key": DONATIX_KEY}
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
+# ===== База (балансы покупателей) =====
+DB_FILE = Path("users.json")
+
+def load_db():
+    if DB_FILE.exists():
+        return json.loads(DB_FILE.read_text())
+    return {"users": {}, "topups": {}}
+
+db = load_db()
+
+def save_db():
+    DB_FILE.write_text(json.dumps(db, ensure_ascii=False))
+
+def get_user(uid: int, name: str) -> dict:
+    uid = str(uid)
+    if uid not in db["users"]:
+        db["users"][uid] = {"balance": 0.0, "name": name, "orders": []}
+        save_db()
+    return db["users"][uid]
+
 # ===== Живой курс USD → TJS =====
-usd_tjs_rate = 10.9  # курс по умолчанию
-rate_updated_at = 0.0
+usd_tjs = 10.9
+rate_at = 0.0
 
 async def update_rate():
-    global usd_tjs_rate, rate_updated_at
-    if time.time() - rate_updated_at < 3600:  # обновляем раз в час
+    global usd_tjs, rate_at
+    if time.time() - rate_at < 3600:
         return
     try:
         async with aiohttp.ClientSession() as s:
             async with s.get("https://open.er-api.com/v6/latest/USD",
                              timeout=aiohttp.ClientTimeout(total=10)) as r:
                 data = await r.json()
-                if data.get("result") == "success":
-                    usd_tjs_rate = data["rates"]["TJS"]
-                    rate_updated_at = time.time()
-                    print(f"Курс обновлён: 1 USD = {usd_tjs_rate:.2f} TJS")
+            if data.get("result") == "success":
+                usd_tjs = data["rates"]["TJS"]
+                rate_at = time.time()
+                print(f"Курс: 1 USD = {usd_tjs:.2f} TJS")
     except Exception as e:
-        print("Ошибка обновления курса:", e)
+        print("Курс ошибка:", e)
 
-def usd_to_tjs(usd: float) -> float:
-    return round(usd * usd_tjs_rate * (1 + MARGIN), 2)
+def tjs_price(usd: float) -> float:
+    return round(usd * usd_tjs * (1 + MARGIN), 2)
 
 # ===== Каталог =====
-catalog = {}  # {category_id: {name, products: [...]}}
-catalog_loaded_at = 0.0
+catalog = {}
+catalog_at = 0.0
 
 async def load_catalog(force=False):
-    global catalog, catalog_loaded_at
-    if not force and time.time() - catalog_loaded_at < 600 and catalog:
+    global catalog, catalog_at
+    if not force and catalog and time.time() - catalog_at < 600:
         return
     if not DONATIX_KEY:
         return
     await update_rate()
     try:
         async with aiohttp.ClientSession() as s:
-            params = {"kind": "topup", "limit": 500}
-            async with s.get(f"{API}/products", params=params, headers=HEADERS,
-                             timeout=aiohttp.ClientTimeout(total=30)) as r:
+            async with s.get(f"{API}/products", params={"kind": "topup", "limit": 500},
+                             headers=HEADERS, timeout=aiohttp.ClientTimeout(total=30)) as r:
                 data = await r.json()
-            items = data.get("items", [])
-            catalog.clear()
-            for p in items:
-                cid = p.get("category_id")
-                if cid not in catalog:
-                    catalog[cid] = {"name": p.get("category_name", cid), "products": []}
-                p["price_tjs"] = usd_to_tjs(float(p.get("price_usd", 0)))
-                catalog[cid]["products"].append(p)
-            catalog_loaded_at = time.time()
-            print(f"Каталог загружен: {len(catalog)} игр")
+        catalog.clear()
+        for p in data.get("items", []):
+            cid = p.get("category_id")
+            if cid not in catalog:
+                catalog[cid] = {"name": p.get("category_name", cid), "products": []}
+            p["price_tjs"] = tjs_price(float(p.get("price_usd", 0)))
+            catalog[cid]["products"].append(p)
+        catalog_at = time.time()
     except Exception as e:
-        print("Ошибка загрузки каталога:", e)
+        print("Каталог ошибка:", e)
 
-# ===== Состояния пользователей =====
-user_state = {}  # {user_id: {"stage": "...", "data": {...}}}
+user_state = {}
 
-def kb_buttons(rows):
+def kb(rows):
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-# ===== Команды =====
-@dp.message(Command("start"))
-async def start(m: Message):
+# ===== Меню =====
+async def send_menu(m: Message):
     await load_catalog()
-    balance = await get_balance()
+    u = get_user(m.from_user.id, m.from_user.full_name or "")
     text = (f"🔥❤️ Хуш омадед ба магазин!\n\n"
-            f"💎 Алмосҳо ва UC — бо ID бозингар, пардохт бо сомонӣ.\n"
-            f"⚡ Фармоиш худкор пас аз пардохт.\n\n"
-            f"💰 Баланс: {balance} с.\n\n"
+            f"💎 Алмос ва UC — бо ID-и бозингар, пардохт бо сомонӣ.\n"
+            f"⚡ Фармоиш пас аз пардохт худкор иҷро мешавад.\n\n"
+            f"💰 Баланси шумо: {u['balance']:.2f} с.\n\n"
             f"Бозиро интихоб кунед 👇")
-    buttons = [
+    rows = [
         [InlineKeyboardButton(text="💎 FF СНГ — алмосҳо", callback_data="game:ff_cis"),
          InlineKeyboardButton(text="🇮🇩 FF Индонезия", callback_data="game:ff_id")],
         [InlineKeyboardButton(text="🎯 PUBG Mobile — UC", callback_data="game:pubg")],
@@ -104,358 +122,351 @@ async def start(m: Message):
          InlineKeyboardButton(text="📦 Фармоишҳои ман", callback_data="my_orders")],
         [InlineKeyboardButton(text="🛟 Дастгирӣ", callback_data="support")],
     ]
-    await m.answer(text, reply_markup=kb_buttons(buttons))
+    await m.answer(text, reply_markup=kb(rows))
+
+@dp.message(Command("start"))
+async def start(m: Message):
+    await send_menu(m)
 
 @dp.message(Command("buy"))
 async def buy(m: Message):
-    await start(m)
+    await send_menu(m)
 
 @dp.message(Command("balance"))
 async def balance_cmd(m: Message):
-    if m.from_user.id != ADMIN_ID:
-        await m.answer("Танҳо админ метавонад баланси мағозаро бинад.")
+    if ADMIN_ID and m.from_user.id == ADMIN_ID:
+        bal = "0.00"
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(f"{API}/balance", headers=HEADERS,
+                                 timeout=aiohttp.ClientTimeout(total=10)) as r:
+                    bal = (await r.json()).get("balance", "0.00")
+        except Exception:
+            pass
+        debt = sum(u["balance"] for u in db["users"].values())
+        await m.answer(f"🏦 Баланси Donatix: {bal} USD\n"
+                       f"👥 Балансҳои харидорон: {debt:.2f} с.\n"
+                       f"📊 Курс: 1 USD = {usd_tjs:.2f} TJS")
         return
-    balance = await get_balance()
-    text = (f"💰 Баланси мағоза: {balance} с.\n\n"
-            f"Пур кунед — ва дар як клик харед.")
-    buttons = [
-        [InlineKeyboardButton(text="+ Пур кардан", url="https://donatix.tj/panel/payments")],
-        [InlineKeyboardButton(text="📜 Таърих", callback_data="order_history")],
+    u = get_user(m.from_user.id, m.from_user.full_name or "")
+    rows = [
+        [InlineKeyboardButton(text="➕ Пур кардан", callback_data="topup")],
+        [InlineKeyboardButton(text="📦 Фармоишҳои ман", callback_data="my_orders")],
         [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")],
     ]
-    await m.answer(text, reply_markup=kb_buttons(buttons))
+    await m.answer(f"💰 Баланси шумо: {u['balance']:.2f} с.\n\n"
+                   f"Пур кунед — ва дар як клик харед!", reply_markup=kb(rows))
 
 @dp.message(Command("help"))
 async def help_cmd(m: Message):
-    text = ("📖 Роҳнамо:\n\n"
-            "/start — Менюи асосӣ\n"
-            "/buy — Интихоби бозӣ\n"
-            "/balance — Баланси мағоза (админ)\n"
-            "/help — Роҳнамо\n\n"
-            "Барои харидан: /buy → бозиро интихоб кунед → пакетро интихоб кунед → ID бозингарро ворид кунед → тасдиқ кунед.")
-    await m.answer(text)
+    await m.answer("📖 Роҳнамо:\n\n"
+                   "/start — Менюи асосӣ\n"
+                   "/balance — Баланси шумо\n"
+                   "/help — Роҳнамо\n\n"
+                   "Харид: /start → бозӣ → пакет → ID → тасдиқ.\n"
+                   "Пур кардан: 💰 Баланс → ➕ Пур кардан.")
 
-# ===== Callback-ҳо =====
+# ===== Callback =====
 @dp.callback_query(F.data == "menu")
-async def menu_cb(c: CallbackQuery):
+async def cb_menu(c: CallbackQuery):
     await c.message.delete()
-    await start(c.message)
+    await send_menu(c.message)
+    await c.answer()
 
 @dp.callback_query(F.data == "all_games")
-async def all_games(c: CallbackQuery):
+async def cb_all_games(c: CallbackQuery):
     await load_catalog()
-    buttons = []
-    row = []
-    for cid, data in catalog.items():
-        btn = InlineKeyboardButton(text=data["name"], callback_data=f"cat:{cid}")
-        row.append(btn)
+    rows, row = [], []
+    for cid, g in catalog.items():
+        row.append(InlineKeyboardButton(text=g["name"][:24], callback_data=f"cat:{cid}"))
         if len(row) == 2:
-            buttons.append(row)
-            row = []
+            rows.append(row); row = []
     if row:
-        buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="‹ Бозгашт", callback_data="menu")])
-    await c.message.edit_text("🎮 Ҳамаи бозиҳо:\n\nБозиро интихоб кунед 👇",
-                              reply_markup=kb_buttons(buttons))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu")])
+    await c.message.edit_text("🎮 Ҳамаи бозиҳо:\n\nБозиро интихоб кунед 👇", reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("game:"))
-async def pick_game(c: CallbackQuery):
+async def cb_game(c: CallbackQuery):
     game = c.data.split(":")[1]
-    game_map = {
-        "ff_cis": "free_fire_cis",
-        "ff_id": "free_fire_indonesia",
-        "pubg": "pubg_mobile",
-    }
-    cid = game_map.get(game)
-    if cid and cid in catalog:
-        await show_category(c, cid)
+    await load_catalog()
+    found = None
+    for cid, g in catalog.items():
+        n = g["name"].lower()
+        if game == "ff_cis" and ("free fire" in n or "ff" in n) and ("cis" in n or "снг" in n):
+            found = cid; break
+        if game == "ff_id" and ("free fire" in n or "ff" in n) and ("indon" in n or "индон" in n):
+            found = cid; break
+        if game == "pubg" and "pubg" in n:
+            found = cid; break
+    if found:
+        await show_category(c, found)
     else:
-        await c.answer("Бозӣ ёфт нашуд", show_alert=True)
+        names = ", ".join(g["name"] for g in list(catalog.values())[:8])
+        await c.answer(f"Ёфт нашуд. Ҳаст: {names}", show_alert=True)
 
 @dp.callback_query(F.data.startswith("cat:"))
-async def pick_category(c: CallbackQuery):
-    cid = c.data.split(":")[1]
-    await show_category(c, cid)
+async def cb_cat(c: CallbackQuery):
+    await show_category(c, c.data.split(":")[1])
 
 async def show_category(c: CallbackQuery, cid: str):
     await load_catalog()
     if cid not in catalog:
-        await c.answer("Категория ёфт нашуд", show_alert=True)
-        return
-    cat = catalog[cid]
-    products = cat["products"]
-    # Группируем по типу
+        await c.answer("Ёфт нашуд", show_alert=True); return
+    g = catalog[cid]
     groups = {}
-    for p in products:
-        name = p.get("name", "")
-        if "diamond" in name.lower() or "алмаз" in name.lower():
-            group = "💎 Алмосҳо"
-        elif "weekly" in name.lower() or "monthly" in name.lower() or "ваучер" in name.lower():
-            group = "🎫 Ваучерҳо ва пропускҳо"
-        elif "level" in name.lower() or "прокач" in name.lower():
-            group = "🚀 Прокачка"
+    for p in g["products"]:
+        n = (p.get("name", "") + " " + (p.get("title") or "")).lower()
+        if "diamond" in n or "алмаз" in n or "uc" in n:
+            grp = "💎 Алмос / UC"
+        elif "weekly" in n or "monthly" in n or "voucher" in n or "ваучер" in n or "prime" in n or "pass" in n:
+            grp = "🎫 Ваучерҳо ва пропускҳо"
+        elif "level" in n or "evo" in n or "прокач" in n:
+            grp = "🚀 Прокачка"
         else:
-            group = "🎁 Дигар"
-        if group not in groups:
-            groups[group] = []
-        groups[group].append(p)
-    
-    text = f"{cat['name']}\n━━━━━━━━━━━━━━━━━━━━\n\nПакетро интихоб кунед — баъд ID бозингарро мепурсам 👇\n\n"
-    buttons = []
-    for group_name, prods in groups.items():
-        text += f"━━ {group_name} ━━\n\n"
-        row = []
-        for p in prods[:10]:  # максимум 10 в группе
-            title = p.get("title") or p.get("name", "")
-            price = p["price_tjs"]
-            btn_text = f"{title} — {price} с."
-            if len(btn_text) > 30:
-                btn_text = btn_text[:27] + "..."
-            row.append(InlineKeyboardButton(text=btn_text, callback_data=f"pkg:{p['product_id']}"))
-            if len(row) == 2:
-                buttons.append(row)
-                row = []
-        if row:
-            buttons.append(row)
-        text += "\n"
-    
-    buttons.append([InlineKeyboardButton(text="‹ Бозгашт", callback_data="menu"),
-                    InlineKeyboardButton(text="🏠 Меню", callback_data="menu")])
-    await c.message.edit_text(text, reply_markup=kb_buttons(buttons))
+            grp = "🎁 Дигар"
+        groups.setdefault(grp, []).append(p)
+    text = f"{g['name']}\n━━━━━━━━━━━━━━━━━━\n\nПакетро интихоб кунед — баъд ID-и бозингарро мепурсам 👇\n"
+    rows = []
+    for grp, prods in groups.items():
+        text += f"\n━━ {grp} ━━\n"
+        line = []
+        for p in prods[:12]:
+            t = (p.get("title") or p.get("name", ""))[:22]
+            line.append(InlineKeyboardButton(text=f"{t} — {p['price_tjs']} с.",
+                                             callback_data=f"pkg:{p['product_id']}"))
+            if len(line) == 2:
+                rows.append(line); line = []
+        if line:
+            rows.append(line)
+    rows.append([InlineKeyboardButton(text="🏠 Меню", callback_data="menu")])
+    await c.message.edit_text(text, reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data.startswith("pkg:"))
-async def pick_package(c: CallbackQuery):
+async def cb_pkg(c: CallbackQuery):
     pid = c.data.split(":")[1]
-    product = None
-    for cat_data in catalog.values():
-        for p in cat_data["products"]:
-            if p["product_id"] == pid:
-                product = p
-                break
+    product = next((p for g in catalog.values() for p in g["products"]
+                    if p["product_id"] == pid), None)
     if not product:
-        await c.answer("Пакет ёфт нашуд", show_alert=True)
-        return
+        await c.answer("Ёфт нашуд", show_alert=True); return
     user_state[c.from_user.id] = {"stage": "waiting_id", "product": product}
-    title = product.get("title") or product.get("name", "")
-    price = product["price_tjs"]
-    text = f"📦 {title}\n💰 Нарх: {price} с.\n\n🆔 ID бозингарро ворид кунед (танҳо рақамҳо):"
-    await c.message.answer(text)
+    await c.message.answer(f"📦 {product.get('title') or product.get('name')}\n"
+                           f"💰 Нарх: {product['price_tjs']} с.\n\n"
+                           f"🆔 ID-и бозингарро ворид кунед (рақамҳо):")
     await c.answer()
-
-@dp.message(F.text.regexp(r"^\d{6,15}$"))
-async def got_player_id(m: Message):
-    if m.from_user.id not in user_state or user_state[m.from_user.id].get("stage") != "waiting_id":
-        return
-    state = user_state[m.from_user.id]
-    product = state["product"]
-    player_id = m.text.strip()
-    state["player_id"] = player_id
-    state["stage"] = "confirm"
-    
-    # Проверяем аккаунт
-    valid = True
-    player_name = None
-    if DONATIX_KEY:
-        try:
-            async with aiohttp.ClientSession() as s:
-                async with s.post(f"{API}/accounts/check",
-                                  json={"product_id": product["product_id"],
-                                        "fields": {"player_id": player_id}},
-                                  headers=HEADERS,
-                                  timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    data = await r.json()
-                if data.get("ok"):
-                    valid = data.get("valid", False)
-                    player_name = data.get("player_name")
-        except Exception:
-            pass
-    
-    if not valid:
-        del user_state[m.from_user.id]
-        await m.answer("❌ Ин ID ёфт нашуд. Лутфан дуруст ворид кунед.")
-        return
-    
-    title = product.get("title") or product.get("name", "")
-    price = product["price_tjs"]
-    name_text = f"\n👤 Ном: {player_name}" if player_name else ""
-    text = (f"✅ Фармоишро тасдиқ кунед:\n\n"
-            f"📦 {title}{name_text}\n"
-            f"🆔 ID: {player_id}\n"
-            f"💰 Нарх: {price} с.\n\n"
-            f"Тасдиқ мекунед?")
-    buttons = [
-        [InlineKeyboardButton(text="✅ Харидан", callback_data=f"confirm:{product['product_id']}:{player_id}"),
-         InlineKeyboardButton(text="❌ Бекор кардан", callback_data="cancel")],
-    ]
-    await m.answer(text, reply_markup=kb_buttons(buttons))
 
 @dp.callback_query(F.data == "cancel")
-async def cancel_order(c: CallbackQuery):
-    if c.from_user.id in user_state:
-        del user_state[c.from_user.id]
-    await c.message.edit_text("❌ Фармоиш бекор карда шуд.\n\n/buy — аз нав оғоз кунед.")
+async def cb_cancel(c: CallbackQuery):
+    user_state.pop(c.from_user.id, None)
+    await c.message.edit_text("❌ Бекор карда шуд. /start — аз нав.")
     await c.answer()
 
-@dp.callback_query(F.data.startswith("confirm:"))
-async def confirm_order(c: CallbackQuery):
-    parts = c.data.split(":")
-    pid, player_id = parts[1], parts[2]
-    product = None
-    for cat_data in catalog.values():
-        for p in cat_data["products"]:
-            if p["product_id"] == pid:
-                product = p
-                break
+@dp.callback_query(F.data.startswith("cfm:"))
+async def cb_confirm(c: CallbackQuery):
+    _, pid, player_id = c.data.split(":")
+    product = next((p for g in catalog.values() for p in g["products"]
+                    if p["product_id"] == pid), None)
     if not product:
-        await c.answer("Хатоӣ", show_alert=True)
-        return
-    
+        await c.answer("Ёфт нашуд", show_alert=True); return
+    u = get_user(c.from_user.id, c.from_user.full_name or "")
+    price = product["price_tjs"]
+    if u["balance"] < price:
+        await c.message.answer(f"❌ Баланс кам аст!\nЛозим: {price} с.\nДоред: {u['balance']:.2f} с.\n\n"
+                               f"Балансро пур кунед 👇",
+                               reply_markup=kb([[InlineKeyboardButton(text="➕ Пур кардан",
+                                                                      callback_data="topup")]]))
+        await c.answer(); return
     if not DONATIX_KEY:
-        await c.message.edit_text("⚠️ Donatix пайваст нест. Лутфан DONATIX_KEY-ро илова кунед.")
-        return
-    
+        await c.message.answer("⚠️ Donatix пайваст нест.")
+        await c.answer(); return
     await c.answer("⏳ Фармоиш сохта мешавад...")
-    
     try:
         async with aiohttp.ClientSession() as s:
-            import uuid
-            headers = {**HEADERS, "Idempotency-Key": str(uuid.uuid4())}
+            h = {**HEADERS, "Idempotency-Key": str(uuid.uuid4())}
             async with s.post(f"{API}/orders",
-                              json={"product_id": pid,
-                                    "fields": {"player_id": player_id}},
-                              headers=headers,
-                              timeout=aiohttp.ClientTimeout(total=30)) as r:
+                              json={"product_id": pid, "fields": {"player_id": player_id}},
+                              headers=h, timeout=aiohttp.ClientTimeout(total=30)) as r:
                 data = await r.json()
-        
         if data.get("ok"):
-            order = data["order"]
-            oid = order.get("order_id", "?")
-            if c.from_user.id in user_state:
-                del user_state[c.from_user.id]
-            await c.message.edit_text(f"✅ Фармоиш #{oid} қабул шуд!\n\n"
-                                      f"📦 {product.get('title') or product.get('name')}\n"
-                                      f"🆔 ID: {player_id}\n\n"
-                                      f"Алмосҳо ба ID фиристода мешаванд.")
+            oid = data["order"].get("order_id", "?")
+            u["balance"] = round(u["balance"] - price, 2)
+            u["orders"].append({"oid": oid, "title": product.get("title") or product.get("name"),
+                                "price": price, "status": "processing"})
+            u["orders"] = u["orders"][-20:]
+            save_db()
+            user_state.pop(c.from_user.id, None)
+            await c.message.answer(f"✅ Фармоиш #{oid} қабул шуд!\n\n"
+                                   f"📦 {product.get('title') or product.get('name')}\n"
+                                   f"🆔 ID: {player_id}\n"
+                                   f"💰 {price} с. аз баланс гирифта шуд.\n"
+                                   f"💰 Баланси ҳозира: {u['balance']:.2f} с.\n\n"
+                                   f"⏳ Алмосҳо ба зудӣ меоянд!")
             if ADMIN_ID:
-                await bot.send_message(ADMIN_ID,
-                    f"💰 Фармоиши нав: #{oid}\n"
-                    f"📦 {product.get('title')}\n"
-                    f"🆔 {player_id}\n"
-                    f"💰 {product['price_tjs']} с.")
+                await bot.send_message(ADMIN_ID, f"💸 Фурӯш: #{oid} · {price} с. · {c.from_user.full_name}")
         else:
-            error = data.get("error", "Номаълум")
-            await c.message.edit_text(f"❌ Хатоӣ: {error}")
+            await c.message.answer(f"❌ Хатои Donatix: {data.get('error', '?')}")
     except Exception as e:
-        await c.message.edit_text(f"⚠️ Хатоӣ: {e}")
+        await c.message.answer(f"⚠️ Хатоӣ: {e}")
 
-@dp.callback_query(F.data == "balance")
-async def balance_page(c: CallbackQuery):
-    balance = await get_balance()
-    text = f"💰 Баланси шумо: {balance} с.\n\nПур кунед — ва дар як клик харед."
-    buttons = [
-        [InlineKeyboardButton(text="+ Пур кардан", url="https://donatix.tj/panel/payments")],
-        [InlineKeyboardButton(text="📜 Таърих", callback_data="order_history")],
+# ===== Пополнение баланса =====
+@dp.callback_query(F.data == "topup")
+async def cb_topup(c: CallbackQuery):
+    rows = [
+        [InlineKeyboardButton(text="10 с.", callback_data="tamt:10"),
+         InlineKeyboardButton(text="20 с.", callback_data="tamt:20"),
+         InlineKeyboardButton(text="50 с.", callback_data="tamt:50")],
+        [InlineKeyboardButton(text="100 с.", callback_data="tamt:100"),
+         InlineKeyboardButton(text="200 с.", callback_data="tamt:200"),
+         InlineKeyboardButton(text="✏️ Дигар", callback_data="tamt:custom")],
         [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")],
     ]
-    await c.message.edit_text(text, reply_markup=kb_buttons(buttons))
+    await c.message.answer("💳 Миқдори пуркуниро интихоб кунед:", reply_markup=kb(rows))
+    await c.answer()
+
+@dp.callback_query(F.data.startswith("tamt:"))
+async def cb_topup_amount(c: CallbackQuery):
+    v = c.data.split(":")[1]
+    if v == "custom":
+        user_state[c.from_user.id] = {"stage": "topup_custom"}
+        await c.message.answer("✏️ Миқдорро бо рақам нависед (масалан 35):")
+        await c.answer(); return
+    await start_topup(c, float(v))
+    await c.answer()
+
+async def start_topup(c: CallbackQuery, amount: float):
+    tid = uuid.uuid4().hex[:8]
+    db["topups"][tid] = {"uid": c.from_user.id, "amount": amount, "status": "pending"}
+    save_db()
+    user_state[c.from_user.id] = {"stage": "receipt", "tid": tid}
+    await c.message.answer(f"💳 Барои пур кардан:\n\n"
+                           f"1️⃣ Ба корт гузаронед: <code>{CARD_NUMBER}</code>\n"
+                           f"👤 {CARD_HOLDER}\n"
+                           f"💵 Миқдор: {amount:.2f} с.\n\n"
+                           f"2️⃣ Чек (акс)-ро ба ҳамин чат фиристед 📸", parse_mode="HTML")
+
+@dp.message(F.photo)
+async def got_receipt(m: Message):
+    st = user_state.get(m.from_user.id)
+    if not st or st.get("stage") != "receipt":
+        return
+    tid = st["tid"]
+    topup = db["topups"].get(tid)
+    if not topup:
+        return
+    user_state.pop(m.from_user.id, None)
+    if ADMIN_ID:
+        await bot.copy_message(ADMIN_ID, m.chat.id, m.message_id)
+        await bot.send_message(ADMIN_ID,
+            f"🧾 Чеки нав!\n👤 {m.from_user.full_name} (ID {m.from_user.id})\n"
+            f"💵 {topup['amount']:.2f} с. (чек {tid})",
+            reply_markup=kb([[InlineKeyboardButton(text="✅ Тасдиқ", callback_data=f"tok:{tid}"),
+                              InlineKeyboardButton(text="❌ Рад", callback_data=f"tno:{tid}")]]))
+        await m.answer("✅ Чек қабул шуд! Интизори тасдиқ бошед (одатан зуд).")
+    else:
+        await m.answer("⚠️ Админ танзим нашудааст (ADMIN_ID).")
+
+@dp.callback_query(F.data.startswith("tok:"))
+async def cb_topup_ok(c: CallbackQuery):
+    tid = c.data.split(":")[1]
+    topup = db["topups"].get(tid)
+    if not topup or topup["status"] != "pending":
+        await c.answer("Аллакай кор карда шуд", show_alert=True); return
+    topup["status"] = "done"
+    u = get_user(topup["uid"], "")
+    u["balance"] = round(u["balance"] + topup["amount"], 2)
+    save_db()
+    try:
+        await bot.send_message(topup["uid"], f"💰 Баланси шумо пур шуд!\n"
+                                             f"➕ {topup['amount']:.2f} с.\n"
+                                             f"💰 Баланси ҳозира: {u['balance']:.2f} с.")
+    except Exception:
+        pass
+    await c.message.edit_text(c.message.text + f"\n\n✅ Тасдиқ карда шуд ({c.from_user.full_name})")
+    await c.answer()
+
+@dp.callback_query(F.data.startswith("tno:"))
+async def cb_topup_no(c: CallbackQuery):
+    tid = c.data.split(":")[1]
+    topup = db["topups"].get(tid)
+    if topup:
+        topup["status"] = "rejected"
+        save_db()
+        try:
+            await bot.send_message(topup["uid"], "❌ Чек тасдиқ нашуд. Бо дастгирӣ тамос гиред.")
+        except Exception:
+            pass
+    await c.message.edit_text(c.message.text + f"\n\n❌ Рад карда шуд ({c.from_user.full_name})")
+    await c.answer()
+
+# ===== Баланс / заказы / поддержка =====
+@dp.callback_query(F.data == "balance")
+async def cb_balance(c: CallbackQuery):
+    u = get_user(c.from_user.id, c.from_user.full_name or "")
+    rows = [
+        [InlineKeyboardButton(text="➕ Пур кардан", callback_data="topup")],
+        [InlineKeyboardButton(text="📦 Фармоишҳои ман", callback_data="my_orders")],
+        [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")],
+    ]
+    await c.message.edit_text(f"💰 Баланси шумо: {u['balance']:.2f} с.\n\n"
+                              f"Пур кунед — ва дар як клик харед!", reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data == "my_orders")
-async def my_orders(c: CallbackQuery):
-    if not DONATIX_KEY:
-        await c.answer("Donatix пайваст нест", show_alert=True)
-        return
-    try:
+async def cb_my_orders(c: CallbackQuery):
+    u = get_user(c.from_user.id, c.from_user.full_name or "")
+    # обновляем статусы последних заказов
+    if DONATIX_KEY:
         async with aiohttp.ClientSession() as s:
-            async with s.get(f"{API}/orders", params={"limit": 10}, headers=HEADERS,
-                             timeout=aiohttp.ClientTimeout(total=15)) as r:
-                data = await r.json()
-        orders = data.get("items", [])
-        if not orders:
-            text = "📦 Фармоишҳои шумо:\n\nҲоло фармоиш нест."
-        else:
-            text = "📦 Фармоишҳои охирин:\n\n"
-            for o in orders[:10]:
-                oid = o.get("order_id", "?")
-                status = o.get("status", "?")
-                name = o.get("product_name", "?")
-                icon = "✅" if status == "completed" else "❌" if status == "failed" else "⏳"
-                text += f"{icon} {oid} · {name}\n"
-        buttons = [[InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
-        await c.message.edit_text(text, reply_markup=kb_buttons(buttons))
-    except Exception as e:
-        await c.message.edit_text(f"⚠️ Хатоӣ: {e}")
+            for o in u["orders"][-8:]:
+                try:
+                    async with s.get(f"{API}/orders/{o['oid']}", headers=HEADERS,
+                                     timeout=aiohttp.ClientTimeout(total=10)) as r:
+                        d = await r.json()
+                    if d.get("ok"):
+                        o["status"] = d["order"].get("status", o["status"])
+                except Exception:
+                    pass
+        save_db()
+    if not u["orders"]:
+        text = "📦 Фармоишҳои шумо:\n\nҲоло фармоиш нест."
+    else:
+        text = "📦 Фармоишҳои шумо:\n\n"
+        for o in reversed(u["orders"][-10:]):
+            icon = {"completed": "✅", "failed": "❌"}.get(o["status"], "⏳")
+            text += f"{icon} {o['oid']} · {o['title']} · {o['price']} с.\n"
+    rows = [[InlineKeyboardButton(text="🔄 Навсозӣ", callback_data="my_orders")],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
+    await c.message.edit_text(text, reply_markup=kb(rows))
     await c.answer()
 
-@dp.callback_query(F.data == "order_history")
-async def order_history(c: CallbackQuery):
-    await my_orders(c)
-
 @dp.callback_query(F.data == "support")
-async def support(c: CallbackQuery):
-    text = ("🛟 Дастгирӣ\n\n"
-            "Нависед, чӣ рух дод — метавонед скриншот, чек ё овозӣ фиристод. "
-            "Ҷавоб медиҳем ва огоҳинома мефиристем.")
-    buttons = [
-        [InlineKeyboardButton(text="💬 Навиштан ба дастгирӣ", url="https://t.me/donatix_support")],
-        [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")],
-    ]
-    await c.message.edit_text(text, reply_markup=kb_buttons(buttons))
+async def cb_support(c: CallbackQuery):
+    rows = [[InlineKeyboardButton(text="💬 Навиштан ба дастгирӣ", url="https://t.me/donatix_support")],
+            [InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
+    await c.message.edit_text("🛟 Дастгирӣ\n\nНависед, чӣ рух дод — скриншот, чек ё овозӣ. "
+                              "Мо ҷавоб медиҳем.", reply_markup=kb(rows))
     await c.answer()
 
 @dp.callback_query(F.data == "tg_stars")
-async def tg_stars(c: CallbackQuery):
-    text = ("⭐ Telegram Stars / Premium\n\n"
-            "Telegram Stars — аз 7.8 с.\n"
-            "Telegram Premium — 3 моҳ: 124.72 с.\n"
-            "Telegram Premium — 6 моҳ: 166.32 с.\n"
-            "Telegram Premium — 12 моҳ: 301.54 с.\n\n"
-            "Барои харидан ба @DonatixShop муроҷиат кунед.")
-    buttons = [[InlineKeyboardButton(text="‹ Бозгашт", callback_data="menu")]]
-    await c.message.edit_text(text, reply_markup=kb_buttons(buttons))
+async def cb_stars(c: CallbackQuery):
+    rows = [[InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
+    await c.message.edit_text("⭐ Telegram Stars / Premium\n\nБа зудӣ! Ҳоло алмос ва UC дастрас аст.",
+                              reply_markup=kb(rows))
     await c.answer()
 
-# ===== API Donatix =====
-async def get_balance() -> str:
-    if not DONATIX_KEY:
-        return "0.00"
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(f"{API}/balance", headers=HEADERS,
-                             timeout=aiohttp.ClientTimeout(total=10)) as r:
-                data = await r.json()
-        return data.get("balance", "0.00")
-    except Exception:
-        return "0.00"
-
-# ===== Веб-сервер + самопинг =====
-async def health(_request):
-    return web.Response(text="Shop bot is alive ✅")
-
-async def keep_alive():
-    if not EXTERNAL_URL:
+# ===== Ввод текста =====
+@dp.message(F.text)
+async def text_handler(m: Message):
+    st = user_state.get(m.from_user.id)
+    if not st:
         return
-    async with aiohttp.ClientSession() as session:
-        while True:
-            await asyncio.sleep(600)
-            try:
-                async with session.get(EXTERNAL_URL,
-                                       timeout=aiohttp.ClientTimeout(total=60)) as r:
-                    await r.text()
-            except Exception as e:
-                print("ping error:", e)
-
-async def main():
-    app = web.Application()
-    app.router.add_get("/", health)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", PORT).start()
-    asyncio.create_task(keep_alive())
-    print("🚀 Магазин запущен")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    if st.get("stage") == "waiting_id" and m.text.strip().isdigit() and 6 <= len(m.text.strip()) <= 15:
+        product = st["product"]
+        pid = m.text.strip()
+        rows = [[InlineKeyboardButton(text="✅ Тасдиқ", callback_data=f"cfm:{product['product_id']}:{pid}"),
+                 InlineKeyboardButton(text="❌ Бекор", callback_data="cancel")]]
+        await m.answer(f"✅ Тасдиқ кунед:\n\n📦 {product.get('title') or product.get('name')}\n"
+                       f"🆔 ID: {pid}\n💰 {product['price_tjs']} с.", reply_markup=kb(rows))
+    elif st.get("stage") == "topup_custom
