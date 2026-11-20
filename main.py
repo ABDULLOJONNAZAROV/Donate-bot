@@ -38,21 +38,17 @@ DB_FILE = Path(os.environ.get("DB_FILE", "users.json"))
 REF_PERCENT = float(os.environ.get("REF_PERCENT", "5"))
 LOW_BALANCE_USD = float(os.environ.get("LOW_BALANCE_USD", "5"))
 BALANCE_PATH = os.environ.get("DONATIX_BALANCE_PATH", "/balance")
+DONATIX_PLAYER_PATH = os.environ.get("DONATIX_PLAYER_PATH", "/player-info")
 SUPPORT_CONTACT = os.environ.get("SUPPORT_CONTACT", "")
 MIN_TOPUP = float(os.environ.get("MIN_TOPUP", "5"))
 MAX_TOPUP = float(os.environ.get("MAX_TOPUP", "5000"))
 TZ = timezone(timedelta(hours=5))  # Душанбе
 
-# --- Новые переменные окружения ---
-# Канал для отзывов (например @donatex_reviews) — ссылка-кнопка в /start
 REVIEWS_CHANNEL = os.environ.get("REVIEWS_CHANNEL", "")
-# ID канала для пересылки отзывов (например -1001234567890)
 REVIEWS_CHANNEL_ID = int(os.environ.get("REVIEWS_CHANNEL_ID", "0"))
-# Новостные каналы по языкам
 NEWS_CHANNEL_TG = os.environ.get("NEWS_CHANNEL_TG", "")
 NEWS_CHANNEL_RU = os.environ.get("NEWS_CHANNEL_RU", "")
 NEWS_CHANNEL_EN = os.environ.get("NEWS_CHANNEL_EN", "")
-# Процент бонуса на первую покупку (скидка)
 FIRST_BONUS_PERCENT = float(os.environ.get("FIRST_BONUS_PERCENT", "10"))
 
 PAY_METHODS = {}
@@ -71,7 +67,6 @@ dp = Dispatcher()
 # ===================== Тексты (tg / ru / en / ar / zh / hi) =====================
 T = {
     "tg": {
-        # Добавлен текст про бонус на первую покупку и статистику
         "welcome": (
             "🔥❤️ Хуш омадед ба DONATEX!\n\n"
             "💎 Алмос ва UC — бо ID-и бозингар, пардохт бо сомонӣ.\n"
@@ -89,8 +84,7 @@ T = {
         "pick_pkg": "Пакетро интихоб кунед 👇",
         "enter_id": "📦 {title}\n💰 {price} с.\n\n🆔 ID-и бозингарро ворид кунед:",
         "bad_id": "❌ ID нодуруст аст (6–15 рақам). Дубора ворид кунед:",
-        # Антифрод — подтверждение введённого ID
-        "confirm_id": "🔎 ID-и шумо: <code>{pid}</code>\n\nДурустаст?",
+        "confirm_id": "🔎 ID-и шумо: <code>{pid}</code>{nick}\n\nДурустаст?",
         "id_ok": "✅ Дуруст", "id_edit": "✏️ Тағйир додан",
         "confirm_q": "📦 {title}\n👤 {target}\n💰 {price} с.{promo}\n\nТасдиқ мекунед?",
         "ok": "✅ Тасдиқ", "cancel": "❌ Бекор", "cancelled": "❌ Бекор карда шуд.",
@@ -126,9 +120,7 @@ T = {
         "games_title": "🎮 Ҳамаи бозиҳо:", "months": "моҳ", "shop_hint": "🛒 Мағозаро кушоед:",
         "help": "📖 /start — меню · /balance — баланс · /admin — панели админ",
         "next": "➡️", "prev": "⬅️",
-        "popular_title": "🔥 Маъмултарин молҳо:",
-        "no_popular": "😕 Маълумот нест.",
-        # Отзывы
+        "popular_title": "🔥 Маъмултарин молҳо:", "no_popular": "😕 Маълумот нест.",
         "review_ask": "⭐ Фармоиш иҷро шуд! Лутфан баҳо диҳед:",
         "review_text_ask": "✍️ Назари худро нависед (ё /skip барои гузаштан):",
         "review_thanks": "🙏 Ташаккур барои назари шумо!",
@@ -152,7 +144,7 @@ T = {
         "pick_pkg": "Выберите пакет 👇",
         "enter_id": "📦 {title}\n💰 {price} с.\n\n🆔 Введите ID игрока:",
         "bad_id": "❌ Неверный ID (6–15 цифр). Введите ещё раз:",
-        "confirm_id": "🔎 Ваш ID: <code>{pid}</code>\n\nВсё верно?",
+        "confirm_id": "🔎 Ваш ID: <code>{pid}</code>{nick}\n\nВсё верно?",
         "id_ok": "✅ Верно", "id_edit": "✏️ Исправить",
         "confirm_q": "📦 {title}\n👤 {target}\n💰 {price} с.{promo}\n\nПодтверждаете?",
         "ok": "✅ Подтвердить", "cancel": "❌ Отмена", "cancelled": "❌ Отменено.",
@@ -188,14 +180,12 @@ T = {
         "games_title": "🎮 Все игры:", "months": "мес.", "shop_hint": "🛒 Откройте магазин:",
         "help": "📖 /start — меню · /balance — баланс · /admin — панель админа",
         "next": "➡️", "prev": "⬅️",
-        "popular_title": "🔥 Популярные товары:",
-        "no_popular": "😕 Нет данных.",
+        "popular_title": "🔥 Популярные товары:", "no_popular": "😕 Нет данных.",
         "review_ask": "⭐ Заказ выполнен! Пожалуйста, оцените:",
         "review_text_ask": "✍️ Напишите ваш отзыв (или /skip чтобы пропустить):",
         "review_thanks": "🙏 Спасибо за ваш отзыв!",
         "review_skip": "/skip",
-    },
-    "en": {
+    },"en": {
         "welcome": (
             "🔥❤️ Welcome to DONATEX!\n\n"
             "💎 Diamonds and UC by player ID, pay in somoni.\n"
@@ -213,7 +203,7 @@ T = {
         "pick_pkg": "Choose a package 👇",
         "enter_id": "📦 {title}\n💰 {price} TJS\n\n🆔 Enter the player ID:",
         "bad_id": "❌ Invalid ID (6–15 digits). Try again:",
-        "confirm_id": "🔎 Your ID: <code>{pid}</code>\n\nIs this correct?",
+        "confirm_id": "🔎 Your ID: <code>{pid}</code>{nick}\n\nIs this correct?",
         "id_ok": "✅ Correct", "id_edit": "✏️ Change",
         "confirm_q": "📦 {title}\n👤 {target}\n💰 {price} TJS{promo}\n\nConfirm?",
         "ok": "✅ Confirm", "cancel": "❌ Cancel", "cancelled": "❌ Cancelled.",
@@ -249,14 +239,12 @@ T = {
         "games_title": "🎮 All games:", "months": "mo.", "shop_hint": "🛒 Open the shop:",
         "help": "📖 /start — menu · /balance — balance · /admin — admin panel",
         "next": "➡️", "prev": "⬅️",
-        "popular_title": "🔥 Popular items:",
-        "no_popular": "😕 No data yet.",
+        "popular_title": "🔥 Popular items:", "no_popular": "😕 No data yet.",
         "review_ask": "⭐ Order completed! Please rate it:",
         "review_text_ask": "✍️ Write your review (or /skip to skip):",
         "review_thanks": "🙏 Thank you for your review!",
         "review_skip": "/skip",
     },
-    # --- Арабский язык ---
     "ar": {
         "welcome": (
             "🔥❤️ مرحباً بك في DONATEX!\n\n"
@@ -275,7 +263,7 @@ T = {
         "pick_pkg": "اختر الباقة 👇",
         "enter_id": "📦 {title}\n💰 {price}\n\n🆔 أدخل معرّف اللاعب:",
         "bad_id": "❌ معرّف غير صحيح (6-15 رقم). حاول مجدداً:",
-        "confirm_id": "🔎 معرّفك: <code>{pid}</code>\n\nهل هذا صحيح؟",
+        "confirm_id": "🔎 معرّفك: <code>{pid}</code>{nick}\n\nهل هذا صحيح؟",
         "id_ok": "✅ صحيح", "id_edit": "✏️ تعديل",
         "confirm_q": "📦 {title}\n👤 {target}\n💰 {price}{promo}\n\nتأكيد؟",
         "ok": "✅ تأكيد", "cancel": "❌ إلغاء", "cancelled": "❌ تم الإلغاء.",
@@ -311,18 +299,16 @@ T = {
         "games_title": "🎮 كل الألعاب:", "months": "شهر", "shop_hint": "🛒 افتح المتجر:",
         "help": "📖 /start — القائمة · /balance — الرصيد · /admin — لوحة الأدمن",
         "next": "➡️", "prev": "⬅️",
-        "popular_title": "🔥 الأكثر شعبية:",
-        "no_popular": "😕 لا توجد بيانات.",
+        "popular_title": "🔥 الأكثر شعبية:", "no_popular": "😕 لا توجد بيانات.",
         "review_ask": "⭐ تم تنفيذ الطلب! يرجى التقييم:",
         "review_text_ask": "✍️ اكتب تقييمك (أو /skip للتخطي):",
-        "review_thanks": "🙏 شكراً على تقييمك!",
+        "review_thanks": "🙏 شكراً لتقييمك!",
         "review_skip": "/skip",
     },
-    # --- Китайский язык ---
     "zh": {
         "welcome": (
             "🔥❤️ 欢迎来到 DONATEX!\n\n"
-            "💎  通过玩家ID购买钻石和UC，使用索莫尼支付。\n"
+            "💎 通过玩家ID购买钻石和UC，使用索莫尼支付。\n"
             "⚡ 付款后自动处理订单。\n"
             "🎁 首次购买享受{bonus}%优惠!\n\n"
             "✅ 已完成: {orders}+ 订单 | 👥 客户: {users}+\n\n"
@@ -337,7 +323,7 @@ T = {
         "pick_pkg": "请选择套餐 👇",
         "enter_id": "📦 {title}\n💰 {price}\n\n🆔 请输入玩家ID:",
         "bad_id": "❌ ID无效 (6-15位数字)。请重试:",
-        "confirm_id": "🔎 您的ID: <code>{pid}</code>\n\n确认正确吗？",
+        "confirm_id": "🔎 您的ID: <code>{pid}</code>{nick}\n\n确认正确吗？",
         "id_ok": "✅ 正确", "id_edit": "✏️ 修改",
         "confirm_q": "📦 {title}\n👤 {target}\n💰 {price}{promo}\n\n确认？",
         "ok": "✅ 确认", "cancel": "❌ 取消", "cancelled": "❌ 已取消。",
@@ -373,14 +359,12 @@ T = {
         "games_title": "🎮 所有游戏:", "months": "月", "shop_hint": "🛒 打开商店:",
         "help": "📖 /start — 菜单 · /balance — 余额 · /admin — 管理面板",
         "next": "➡️", "prev": "⬅️",
-        "popular_title": "🔥 热门商品:",
-        "no_popular": "😕 暂无数据。",
+        "popular_title": "🔥 热门商品:", "no_popular": "😕 暂无数据。",
         "review_ask": "⭐ 订单已完成！请评分:",
         "review_text_ask": "✍️ 写下您的评价 (或 /skip 跳过):",
-        "review_thanks": "🙏 感谢您的评价！",
+        "review_thanks": "🙏 感谢您的评价!",
         "review_skip": "/skip",
     },
-    # --- Хинди ---
     "hi": {
         "welcome": (
             "🔥❤️ DONATEX में आपका स्वागत है!\n\n"
@@ -399,7 +383,7 @@ T = {
         "pick_pkg": "पैकेज चुनें 👇",
         "enter_id": "📦 {title}\n💰 {price}\n\n🆔 प्लेयर ID दर्ज करें:",
         "bad_id": "❌ अमान्य ID (6-15 अंक)। दोबारा कोशिश करें:",
-        "confirm_id": "🔎 आपका ID: <code>{pid}</code>\n\nक्या यह सही है?",
+        "confirm_id": "🔎 आपका ID: <code>{pid}</code>{nick}\n\nक्या यह सही है?",
         "id_ok": "✅ सही है", "id_edit": "✏️ बदलें",
         "confirm_q": "📦 {title}\n👤 {target}\n💰 {price}{promo}\n\nपुष्टि करें?",
         "ok": "✅ पुष्टि करें", "cancel": "❌ रद्द करें", "cancelled": "❌ रद्द किया गया।",
@@ -435,23 +419,19 @@ T = {
         "games_title": "🎮 सभी गेम:", "months": "महीने", "shop_hint": "🛒 दुकान खोलें:",
         "help": "📖 /start — मेनू · /balance — बैलेंस · /admin — एडमिन पैनल",
         "next": "➡️", "prev": "⬅️",
-        "popular_title": "🔥 लोकप्रिय आइटम:",
-        "no_popular": "😕 कोई डेटा नहीं।",
+        "popular_title": "🔥 लोकप्रिय आइटम:", "no_popular": "😕 कोई डेटा नहीं।",
         "review_ask": "⭐ ऑर्डर पूरा हो गया! कृपया रेटिंग दें:",
         "review_text_ask": "✍️ अपनी समीक्षा लिखें (या /skip करें):",
         "review_thanks": "🙏 आपकी समीक्षा के लिए धन्यवाद!",
         "review_skip": "/skip",
     },
-}
-
-# ===================== Хранилище =====================
+                          }# ===================== Хранилище =====================
 DEFAULT_DB = {"users": {}, "topups": {}, "orders": [], "promos": {}, "meta": {}}
-# Добавлены новые поля: first_purchase_bonus_used, transactions
 USER_DEFAULTS = {
     "balance": 0.0, "name": "", "blocked": False, "lang": "tg", "ref_by": None,
     "refs": 0, "ref_earned": 0.0, "topped": False, "promo": None, "joined": 0,
-    "first_purchase_bonus_used": False,  # флаг бонуса на первую покупку
-    "transactions": [],                   # история операций
+    "first_purchase_bonus_used": False,
+    "transactions": [],
 }
 db = json.loads(json.dumps(DEFAULT_DB))
 pg_pool = None
@@ -465,12 +445,12 @@ async def init_db():
     if DATABASE_URL:
         import asyncpg
         pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3,
-                                            statement_cache_size=0)
+                                              statement_cache_size=0)
         async with pg_pool.acquire() as con:
             await con.execute("CREATE TABLE IF NOT EXISTS kv (key text PRIMARY KEY, value text NOT NULL)")
             row = await con.fetchrow("SELECT value FROM kv WHERE key='db'")
-        if row:
-            data = json.loads(row["value"])
+            if row:
+                data = json.loads(row["value"])
         log.info("DB: PostgreSQL")
     elif DB_FILE.exists():
         data = json.loads(DB_FILE.read_text())
@@ -527,7 +507,7 @@ def get_user(uid, name=""):
             u.setdefault(k, v)
     if name and u["name"] != name:
         u["name"] = name
-        save_db()
+    save_db()
     return u
 
 
@@ -566,9 +546,8 @@ def now_ts():
     return int(time.time())
 
 
-# ===================== Вспомогательная функция для пустых состояний =====================
 def cta_kb(uid):
-    """Клавиатура с призывом к действию — используется вместо тупиковых экранов."""
+    """Клавиатура с призывом к действию — вместо тупиковых экранов."""
     return kb([[btn(t(uid, "popular"), "popular"), btn(t(uid, "menu"), "menu")]])
 
 
@@ -579,12 +558,11 @@ def add_transaction(uid, amount, tx_type, desc=""):
     if "transactions" not in u:
         u["transactions"] = []
     u["transactions"].append({
-        "type": tx_type,   # "topup" или "order"
+        "type": tx_type,
         "amount": amount,
         "ts": now_ts(),
         "desc": desc,
     })
-    # Храним последние 50 операций
     u["transactions"] = u["transactions"][-50:]
 
 
@@ -615,9 +593,9 @@ async def update_rate():
             async with s.get("https://open.er-api.com/v6/latest/USD",
                              timeout=aiohttp.ClientTimeout(total=10)) as r:
                 d = await r.json(content_type=None)
-        if d.get("result") == "success":
-            usd_tjs = d["rates"]["TJS"]
-            rate_at = time.time()
+                if d.get("result") == "success":
+                    usd_tjs = d["rates"]["TJS"]
+                    rate_at = time.time()
     except Exception as e:
         log.warning("rate: %s", e)
 
@@ -626,7 +604,7 @@ def tjs(usd):
     return round(usd * usd_tjs * (1 + MARGIN), 2)
 
 
-# ===================== Каталог =====================
+# ===================== Каталог (ВСЕ страницы) =====================
 catalog, cat_short, prod_short = {}, {}, {}
 special = {"stars": None, "premium": {}}
 cat_at = 0.0
@@ -646,7 +624,7 @@ async def load_catalog(force=False):
                                  timeout=aiohttp.ClientTimeout(total=30)) as r:
                     return await r.json(content_type=None)
 
-            # === ИСПРАВЛЕНИЕ: грузим ВСЕ товары, а не только первые 500 ===
+            # === Грузим ВСЕ товары через пагинацию, а не только первые 500 ===
             all_items, seen = [], set()
             LIMIT = 500
 
@@ -713,11 +691,68 @@ async def load_catalog(force=False):
     except Exception as e:
         log.error("catalog: %s", e)
 
+
 def ptitle(p):
     return str(p.get("title") or p.get("name") or p.get("product_id"))
 
 
-# ===================== Популярные товары =====================
+# ===================== Ник игрока по ID =====================
+_player_path = None  # запомним рабочий путь API
+
+
+def find_nick(x):
+    """Рекурсивно ищет ник в ответе API."""
+    keys = ("nickname", "nick", "player_name", "playername",
+            "username", "account_name", "character_name")
+    if isinstance(x, dict):
+        for k in keys:
+            v = x.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+        for v in x.values():
+            r = find_nick(v)
+            if r:
+                return r
+    elif isinstance(x, list):
+        for v in x:
+            r = find_nick(v)
+            if r:
+                return r
+    return None
+
+
+async def fetch_nickname(p, player_id):
+    """Возвращает ник игрока по ID или None, если API не ответил."""
+    global _player_path
+    if not DONATIX_KEY:
+        return None
+    cid = p.get("category_id")
+    paths = ([_player_path] if _player_path else []) + [
+        x for x in (DONATIX_PLAYER_PATH, "/player-info", "/player",
+                    "/players", "/nickname", "/check-player")
+        if x not in paths]
+    try:
+        async with aiohttp.ClientSession() as s:
+            for path in paths:
+                try:
+                    async with s.get(f"{API}{path}",
+                                     params={"category_id": cid, "player_id": player_id},
+                                     headers=HEADERS,
+                                     timeout=aiohttp.ClientTimeout(total=8)) as r:
+                        if r.status != 200:
+                            continue
+                        d = await r.json(content_type=None)
+                        nick = find_nick(d)
+                        if nick:
+                            _player_path = path
+                            log.info("nick: %s => %s (%s)", player_id, nick, path)
+                            return nick
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    log.info("nick: не найден для %s (категория %s)", player_id, cid)
+    return None # ===================== Популярные товары =====================
 def get_popular_products(days=30, limit=10):
     """Возвращает топ-N товаров по количеству заказов за последние N дней."""
     since = time.time() - days * 86400
@@ -729,9 +764,7 @@ def get_popular_products(days=30, limit=10):
             continue
         title = o.get("title", "")
         counts[title] = counts.get(title, 0) + 1
-    # Сортируем по убыванию
     top = sorted(counts.items(), key=lambda x: -x[1])[:limit]
-    # Находим товары в каталоге по названию
     result = []
     for title, cnt in top:
         for p in prod_short.values():
@@ -755,13 +788,9 @@ def promo_valid(p, uid=None):
 def final_price(uid, base):
     """Рассчитывает финальную цену с учётом промокода и бонуса на первую покупку."""
     u = get_user(uid)
-
-    # Проверяем бонус на первую покупку
     if not u.get("first_purchase_bonus_used", False):
         discount = FIRST_BONUS_PERCENT / 100
-        return round(base * (1 - discount), 2), None, True  # цена, промокод, is_first_bonus
-
-    # Иначе проверяем промокод
+        return round(base * (1 - discount), 2), None, True
     code = u.get("promo")
     p = db["promos"].get(code) if code else None
     if p and promo_valid(p, uid):
@@ -819,19 +848,14 @@ async def send_menu(msg, user):
     uid = user.id
     u = get_user(uid, user.full_name or "")
     user_state.pop(uid, None)
-
-    # Динамическая статистика для приветствия (пункт 3)
     total_orders = len([o for o in db["orders"] if o.get("status") == "done"])
     total_users = len(db["users"])
-
     welcome_text = t(uid, "welcome",
                      bonus=f"{FIRST_BONUS_PERCENT:g}",
                      orders=total_orders,
                      users=total_users,
                      bal=f"{u['balance']:.2f}")
-
     rows = [
-        # Кнопка "Популярное" первой (пункт 2)
         [btn(t(uid, "popular"), "popular")],
         [btn("💎 FF СНГ", "game:ff_cis"), btn("🇮🇩 FF Индонезия", "game:ff_id")],
         [btn("🎯 PUBG Mobile — UC", "game:pubg")],
@@ -840,27 +864,18 @@ async def send_menu(msg, user):
         [btn(t(uid, "promo"), "promo"), btn(t(uid, "ref"), "ref")],
         [btn(t(uid, "support"), "support"), btn(t(uid, "lang"), "lang")],
     ]
-
-    # Кнопка новостей (пункт 11)
     news_ch = get_news_channel(uid)
     if news_ch:
         rows.append([btn(t(uid, "news"), "news_channel")])
-
-    if is_admin(uid):
-        rows.append([btn("🛠 Панели админ", "admin")])
-
-    markup = kb(rows)
-
-    # Добавляем кнопку отзывов если есть канал (пункт 3)
     if REVIEWS_CHANNEL:
         ch_url = REVIEWS_CHANNEL if REVIEWS_CHANNEL.startswith("http") else f"https://t.me/{REVIEWS_CHANNEL.lstrip('@')}"
-        # Добавляем кнопку-ссылку — делаем отдельное сообщение с этой кнопкой
-        await msg.answer(welcome_text, reply_markup=kb(
-            rows[:-1] + [[lbtn(t(uid, "reviews_btn"), ch_url)]] + [rows[-1]] if is_admin(uid)
-            else rows + [[lbtn(t(uid, "reviews_btn"), ch_url)]]
-        ))
-    else:
-        await msg.answer(welcome_text, reply_markup=markup)
+        if is_admin(uid):
+            rows = rows[:-1] + [[lbtn(t(uid, "reviews_btn"), ch_url)]] + [rows[-1]]
+        else:
+            rows = rows + [[lbtn(t(uid, "reviews_btn"), ch_url)]]
+    if is_admin(uid):
+        rows.append([btn("🛠 Панели админ", "admin")])
+    await msg.answer(welcome_text, reply_markup=kb(rows))
 
 
 @dp.message(CommandStart())
@@ -873,7 +888,7 @@ async def start(m, command: CommandObject):
         if rid != str(uid) and rid in db["users"]:
             u["ref_by"] = rid
             db["users"][rid]["refs"] = db["users"][rid].get("refs", 0) + 1
-    save_db()
+            save_db()
     await send_menu(m, m.from_user)
     if EXTERNAL_URL:
         await m.answer(t(uid, "shop_hint"), reply_markup=ReplyKeyboardMarkup(
@@ -910,7 +925,6 @@ async def cb_menu(c):
 async def cb_balance(c):
     uid = c.from_user.id
     u = get_user(uid, c.from_user.full_name or "")
-    # Показываем баланс + историю транзакций (пункт 6)
     text = t(uid, "bal_text", bal=f"{u['balance']:.2f}") + tx_text(uid)
     await c.message.answer(text, reply_markup=kb([
         [btn(t(uid, "topup"), "topup")],
@@ -925,7 +939,6 @@ async def cb_orders(c):
     mine = [o for o in db["orders"] if o["uid"] == uid][-10:][::-1]
     icons = {"done": "✅", "processing": "⏳", "uncertain": "⚠️", "failed": "❌"}
     if not mine:
-        # Используем cta_kb вместо тупикового экрана (пункт 4)
         await c.message.answer(t(uid, "no_orders"), reply_markup=cta_kb(uid))
     else:
         text = t(uid, "orders_title") + "\n\n" + "\n".join(
@@ -967,7 +980,6 @@ async def cb_popular(c):
     uid = c.from_user.id
     top = get_popular_products()
     if not top:
-        # Если статистики нет — показываем случайные из каталога
         all_prods = list(prod_short.values())[:10]
         if not all_prods:
             await c.message.answer(t(uid, "no_popular"), reply_markup=cta_kb(uid))
@@ -990,9 +1002,7 @@ async def cb_popular(c):
 async def cb_lang(c):
     uid = c.from_user.id
     await c.message.answer(t(uid, "lang_choose"), reply_markup=kb([
-        # Строка 1: таджикский, русский, английский
         [btn("🇹🇯 Тоҷикӣ", "setlang:tg"), btn("🇷🇺 Русский", "setlang:ru"), btn("🇬🇧 English", "setlang:en")],
-        # Строка 2: арабский, китайский, хинди
         [btn("🇸🇦 العربية", "setlang:ar"), btn("🇨🇳 中文", "setlang:zh"), btn("🇮🇳 हिन्दी", "setlang:hi")],
     ]))
     await c.answer()
@@ -1004,8 +1014,8 @@ async def cb_setlang(c):
     if lang in T:
         get_user(c.from_user.id)["lang"] = lang
         save_db()
-    await c.answer(t(c.from_user.id, "lang_set"))
-    await send_menu(c.message, c.from_user)
+        await c.answer(t(c.from_user.id, "lang_set"))
+        await send_menu(c.message, c.from_user)
 
 
 # ===================== Промокод / Рефералка =====================
@@ -1028,17 +1038,16 @@ async def cb_ref(c):
         t(uid, "ref_text", pct=f"{REF_PERCENT:g}", link=f"https://t.me/{_bot_username}?start=ref_{uid}",
           n=u["refs"], earned=f"{u['ref_earned']:.2f}"),
         reply_markup=kb([[btn(t(uid, "menu"), "menu")]]))
-    await c.answer()
-
-
-# ===================== Игры =====================
+    await c.answer() # ===================== Игры =====================
 GAMES_PER_PAGE = 10
 
 
 def _norm(s):
+    """Нормализует название: нижний регистр, символы -> пробелы."""
     s = str(s).lower().replace("ё", "е")
     s = re.sub(r"[_\-–—/.,:;()\[\]]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
+
 
 def match_game(game):
     game = (game or "").strip()
@@ -1075,13 +1084,17 @@ def match_game(game):
     if game == "pubg" and pubg_list:
         def score(h):
             s = 0
-            if "global" in h or "world" in h: s += 2
-            if "mobile" in h: s += 1
-            if re.search(r"\b(kr|vn|tw|jp|korea|vietnam|taiwan|japan)\b", h): s -= 3
+            if "global" in h or "world" in h:
+                s += 2
+            if "mobile" in h:
+                s += 1
+            if re.search(r"\b(kr|vn|tw|jp|korea|vietnam|taiwan|japan)\b", h):
+                s -= 3
             return s
         pubg_list.sort(key=lambda x: -score(x[1]))
         return pubg_list[0][0]
     return None
+
 
 @dp.callback_query(F.data.startswith("game:"))
 async def cb_game(c):
@@ -1254,10 +1267,7 @@ async def webapp_data(m):
         await m.answer(t(uid, "nf"))
         return
     user_state[uid] = {"stage": "waiting_id", "product": p}
-    await m.answer(t(uid, "enter_id", title=esc(ptitle(p)), price=p["price_tjs"]))
-
-
-# ===================== Ввод текста =====================
+    await m.answer(t(uid, "enter_id", title=esc(ptitle(p)), price=p["price_tjs"])) # ===================== Ввод текста =====================
 def parse_amount(txt):
     try:
         v = float(txt.strip().replace(",", "."))
@@ -1279,11 +1289,12 @@ async def text_handler(m):
     if stage == "waiting_id":
         if txt.isdigit() and 6 <= len(txt) <= 15:
             p = st["product"]
-            # Антифрод — сначала показываем ID для подтверждения (пункт 8)
-            tok = new_pending(uid=uid, pid=txt, product=p)
+            nick = await fetch_nickname(p, txt)          # запрос ника игрока
+            nick_line = f"\n👤 {esc(nick)}" if nick else ""
+            tok = new_pending(uid=uid, pid=txt, product=p, nick=nick)
             user_state.pop(uid, None)
             await m.answer(
-                t(uid, "confirm_id", pid=txt),
+                t(uid, "confirm_id", pid=txt, nick=nick_line),
                 reply_markup=kb([[btn(t(uid, "id_ok"), f"idok:{tok}"),
                                   btn(t(uid, "id_edit"), f"idedit:{tok}")]])
             )
@@ -1318,13 +1329,11 @@ async def text_handler(m):
         else:
             await m.answer(t(uid, "promo_bad"))
 
-    # ===================== Отзыв — ввод текста =====================
     elif stage == "review_text":
         user_state.pop(uid, None)
         stars = st.get("stars", 5)
         order_title = st.get("title", "")
         review_text = txt if txt != "/skip" else ""
-        # Пересылаем отзыв в канал
         if REVIEWS_CHANNEL_ID:
             try:
                 msg_text = (
@@ -1354,7 +1363,7 @@ async def text_handler(m):
         await m.answer(f"✅ Баланс {esc(tu['name'])}: {tu['balance']:.2f} с.")
         try:
             await bot.send_message(int(target), t(target, "topup_done", amount=f"{v:.2f}",
-                                                  bal=f"{tu['balance']:.2f}"))
+                                                   bal=f"{tu['balance']:.2f}"))
         except Exception:
             pass
 
@@ -1403,7 +1412,9 @@ async def cb_id_ok(c):
     await c.answer()
     p = data["product"]
     pid = data["pid"]
-    await ask_confirm(c.message, uid, ptitle(p), pid, p["price_tjs"],
+    nick = data.get("nick")
+    target = pid + (f"\n👤 {esc(nick)}" if nick else "")
+    await ask_confirm(c.message, uid, ptitle(p), target, p["price_tjs"],
                       float(p.get("price_usd", 0)),
                       {"product_id": p["product_id"], "fields": {"player_id": pid}})
 
@@ -1429,10 +1440,7 @@ async def cb_id_edit(c):
 async def cb_cancel(c):
     user_state.pop(c.from_user.id, None)
     await edit_or_send(c.message, t(c.from_user.id, "cancelled"))
-    await c.answer()
-
-
-# ===================== Заказы =====================
+    await c.answer() # ===================== Заказы =====================
 async def ask_confirm(m, uid, title, target, base, cost_usd, body):
     u = get_user(uid)
     price, code, is_first_bonus = final_price(uid, base)
@@ -1492,9 +1500,7 @@ async def create_order(uid, chat_id, title, base, cost_usd, body):
             await bot.send_message(chat_id, t(uid, "low", price=price, bal=f"{u['balance']:.2f}"),
                                    reply_markup=kb([[btn(t(uid, "topup"), "topup")]]))
             return
-        # Резервируем сумму ДО запроса
         u["balance"] = round(u["balance"] - price, 2)
-        # Записываем транзакцию списания (пункт 6)
         add_transaction(uid, -price, "order", title[:30])
         idem = str(uuid.uuid4())
         rec = {"oid": "?", "idem": idem, "uid": uid, "name": u["name"], "title": title, "price": price,
@@ -1502,7 +1508,6 @@ async def create_order(uid, chat_id, title, base, cost_usd, body):
                "status": "processing", "ts": now_ts()}
         db["orders"].append(rec)
         save_db()
-
         http, data = 0, {}
         try:
             async with aiohttp.ClientSession() as s:
@@ -1522,16 +1527,12 @@ async def create_order(uid, chat_id, title, base, cost_usd, body):
             await notify_admin(f"⚠️ Заказ не подтверждён (таймаут/сбой): {esc(u['name'])} ({uid})\n"
                                f"{esc(title)} · {price} с. · Idempotency-Key: <code>{idem}</code>\n{esc(e)}")
             return
-
         if isinstance(data, dict) and data.get("ok"):
             oid = (data.get("order") or {}).get("order_id", "?")
             rec["oid"] = oid
             rec["status"] = "done"
-
-            # Применяем бонус первой покупки (пункт 1)
             if is_first_bonus:
                 u["first_purchase_bonus_used"] = True
-
             if code:
                 p = db["promos"].get(code)
                 if p:
@@ -1540,12 +1541,9 @@ async def create_order(uid, chat_id, title, base, cost_usd, body):
                 u["promo"] = None
             save_db()
             await bot.send_message(chat_id, t(uid, "order_ok", oid=esc(oid), price=price,
-                                              bal=f"{u['balance']:.2f}"))
+                                               bal=f"{u['balance']:.2f}"))
             await notify_admin(f"💸 Фурӯш: #{esc(oid)} · {esc(title)} · {price} с. · {esc(u['name'])}")
-
-            # Запрашиваем отзыв после успешного заказа (пункт 10)
             await request_review(uid, chat_id, title)
-
         elif http >= 500:
             rec["status"] = "uncertain"
             save_db()
@@ -1561,7 +1559,7 @@ async def create_order(uid, chat_id, title, base, cost_usd, body):
                 await notify_admin(f"🚨 Баланс Donatix, эҳтимол, тамом шуд!\n{esc(err)}")
 
 
-# ===================== Система отзывов (пункт 10) =====================
+# ===================== Система отзывов =====================
 async def request_review(uid, chat_id, title):
     """Отправляет пользователю запрос на оценку после успешного заказа."""
     try:
@@ -1572,7 +1570,6 @@ async def request_review(uid, chat_id, title):
             btn("⭐4", f"rv:{uid}:4:{sid(title)}"),
             btn("⭐5", f"rv:{uid}:5:{sid(title)}"),
         ]]
-        # Сохраняем заголовок заказа во временном хранилище
         db["meta"][f"rv_title_{uid}"] = title
         await bot.send_message(chat_id, t(uid, "review_ask"), reply_markup=kb(rows))
     except Exception as e:
@@ -1598,7 +1595,7 @@ async def cb_review_stars(c):
     await c.answer()
 
 
-# ===================== Пополнение (ускоренный путь — пункт 5) =====================
+# ===================== Пополнение =====================
 @dp.callback_query(F.data == "topup")
 async def cb_topup(c):
     uid = c.from_user.id
@@ -1608,20 +1605,16 @@ async def cb_topup(c):
     if not PAY_METHODS:
         await c.answer(t(uid, "no_pay"), show_alert=True)
         return
-
-    # Если метод оплаты один — сразу показываем суммы (сокращение пути)
     if len(PAY_METHODS) == 1:
         mk = list(PAY_METHODS.keys())[0]
         await _show_topup_amounts(c, uid, mk)
     else:
-        # Показываем методы, но сразу со встроенными суммами
         rows = []
         for mk, mm in PAY_METHODS.items():
             rows.append([btn(mm["title"], f"tm:{mk}")])
-            # Добавляем быстрые суммы прямо под каждым методом
-            rows.append([btn(f"10с", f"tamt:10:{mk}"), btn(f"20с", f"tamt:20:{mk}"),
-                         btn(f"50с", f"tamt:50:{mk}")])
-            rows.append([btn(f"100с", f"tamt:100:{mk}"), btn(f"200с", f"tamt:200:{mk}"),
+            rows.append([btn("10с", f"tamt:10:{mk}"), btn("20с", f"tamt:20:{mk}"),
+                         btn("50с", f"tamt:50:{mk}")])
+            rows.append([btn("100с", f"tamt:100:{mk}"), btn("200с", f"tamt:200:{mk}"),
                          btn(t(uid, "other"), f"tamt:custom:{mk}")])
         rows.append([btn(t(uid, "menu"), "menu")])
         await c.message.answer(t(uid, "choose_pay"), reply_markup=kb(rows))
@@ -1717,9 +1710,7 @@ async def cb_topup_ok(c):
     uid = topup["uid"]
     u = get_user(uid)
     u["balance"] = round(u["balance"] + topup["amount"], 2)
-    # Записываем транзакцию пополнения (пункт 6)
     add_transaction(uid, topup["amount"], "topup", PAY_METHODS.get(topup.get("method", ""), {}).get("title", ""))
-    # Реферальный бонус — только с первого пополнения
     if not u["topped"]:
         u["topped"] = True
         rid = u.get("ref_by")
@@ -1760,10 +1751,7 @@ async def cb_topup_no(c):
     except Exception:
         pass
     await c.message.edit_text((c.message.html_text or "") + f"\n\n❌ Рад: {esc(c.from_user.full_name)}")
-    await c.answer()
-
-
-# ===================== Панель админа =====================
+    await c.answer() # ===================== Панель админа =====================
 async def donatix_balance():
     if not DONATIX_KEY:
         return None
@@ -1798,6 +1786,7 @@ async def donatix_balance():
                     if r2 is not None:
                         return r2
         return None
+
     return find(d)
 
 
@@ -1806,7 +1795,7 @@ def sales():
 
 
 def stats_text():
-    """Расширенная статистика для админа (пункт 13)."""
+    """Расширенная статистика для админа."""
     days = [(datetime.now(TZ) - timedelta(days=i)).date() for i in range(6, -1, -1)]
     by_day = {d: [0, 0.0] for d in days}
     rev = profit = 0.0
@@ -1824,17 +1813,13 @@ def stats_text():
                      for d, v in by_day.items())
     top_lines = "\n".join(f"{i + 1}. {esc(k)} — {v}" for i, (k, v) in
                           enumerate(sorted(top.items(), key=lambda x: -x[1])[:5])) or "—"
-
-    # Новые метрики (пункт 13)
     today = datetime.now(TZ).date()
     new_today = sum(1 for u in db["users"].values()
                     if datetime.fromtimestamp(u.get("joined", 0), TZ).date() == today)
     total_sales = len(sales())
     avg_check = rev / total_sales if total_sales > 0 else 0
-    # Конверсия: пользователи с хотя бы одним заказом / все пользователи
     buyers = set(o["uid"] for o in sales())
     conversion = len(buyers) / max(len(db["users"]), 1) * 100
-
     return (
         f"📊 <b>Омор</b>\n\n"
         f"Фармоишҳо: {total_sales}\n"
@@ -1873,7 +1858,7 @@ def admin_only(handler):
             await c.answer("🚫", show_alert=True)
             return
         await handler(c)
-    wrapper.__name__ = handler.__name__
+    wrapper.name = handler.name
     return wrapper
 
 
@@ -1901,7 +1886,7 @@ async def cb_adm_users(c):
         nav.append(btn("➡️", f"adm_users:{page + 1}"))
     if nav:
         rows.append(nav)
-    rows.append([btn("🔙", "admin")])
+    rows.append([btn("🔙", "adm_users:0")])
     await edit_or_send(c.message, f"👥 Харидорон: {len(items)}", kb(rows))
 
 
@@ -1935,8 +1920,8 @@ async def cb_adb(c):
     if k in db["users"]:
         db["users"][k]["blocked"] = not db["users"][k]["blocked"]
         save_db()
-    await c.answer("OK")
-    await show_user_card(c, k)
+        await c.answer("OK")
+        await show_user_card(c, k)
 
 
 @dp.callback_query(F.data.startswith("adr:"))
@@ -1946,8 +1931,8 @@ async def cb_adr(c):
     if k in db["users"]:
         db["users"][k]["balance"] = 0.0
         save_db()
-    await c.answer("Баланс = 0")
-    await show_user_card(c, k)
+        await c.answer("Баланс = 0")
+        await show_user_card(c, k)
 
 
 @dp.callback_query(F.data.startswith("ada:"))
@@ -2028,8 +2013,8 @@ async def cb_apt(c):
     if code in db["promos"]:
         db["promos"][code]["active"] = not db["promos"][code].get("active", True)
         save_db()
-    await c.answer("OK")
-    await cb_adm_promos(c)
+        await c.answer("OK")
+        await cb_adm_promos(c)
 
 
 @dp.callback_query(F.data == "adm_promo_new")
@@ -2091,10 +2076,7 @@ async def keepalive():
             async with aiohttp.ClientSession() as s:
                 await s.get(EXTERNAL_URL + "/", timeout=aiohttp.ClientTimeout(total=15))
         except Exception:
-            pass
-
-
-# ===================== Улучшенный Web App (пункт 12) =====================
+            pass # ===================== Web App =====================
 WEBAPP_HTML = """<!doctype html>
 <html lang="ru">
 <head>
@@ -2103,253 +2085,199 @@ WEBAPP_HTML = """<!doctype html>
 <title>DONATEX</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-  :root {
-    --bg: #0d1117;
-    --bg2: #161b22;
-    --bg3: #1f2937;
-    --accent: #7b68ee;
-    --accent2: #9b8aff;
-    --text: #e6edf3;
-    --text2: #8b949e;
-    --card-bg: #1a1f2e;
-    --card-border: rgba(123,104,238,0.2);
-    --shadow: 0 4px 20px rgba(123,104,238,0.15);
-    --radius: 14px;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, 'SF Pro Display', Segoe UI, Roboto, sans-serif;
-    min-height: 100vh;
-    padding-bottom: 70px;
-  }
-
-  /* ===== Анимированный заголовок DONATEX ===== */
-  .header {
-    background: linear-gradient(135deg, #0d1117, #1a1030);
-    padding: 20px 16px 16px;
-    text-align: center;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    border-bottom: 1px solid var(--card-border);
-    backdrop-filter: blur(10px);
-  }
-  .logo {
-    font-size: 28px;
-    font-weight: 900;
-    letter-spacing: 3px;
-    background: linear-gradient(90deg, #7b68ee, #ff6b9d, #7b68ee, #00d4ff);
-    background-size: 300% 100%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    animation: shimmer 3s linear infinite;
-    text-transform: uppercase;
-  }
-  @keyframes shimmer {
-    0% { background-position: 0% 50%; }
-    100% { background-position: 300% 50%; }
-  }
-  .logo-sub {
-    font-size: 11px;
-    color: var(--text2);
-    letter-spacing: 2px;
-    margin-top: 2px;
-    text-transform: uppercase;
-  }
-
-  /* ===== Поиск с иконкой ===== */
-  .search-wrap {
-    padding: 12px 16px 8px;
-    position: sticky;
-    top: 80px;
-    z-index: 99;
-    background: var(--bg);
-  }
-  .search-box {
-    display: flex;
-    align-items: center;
-    background: var(--bg2);
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    padding: 10px 14px;
-    gap: 10px;
-    transition: border-color 0.2s;
-  }
-  .search-box:focus-within {
-    border-color: var(--accent);
-  }
-  .search-icon {
-    font-size: 16px;
-    flex-shrink: 0;
-    color: var(--text2);
-  }
-  .search-box input {
-    flex: 1;
-    background: none;
-    border: none;
-    outline: none;
-    color: var(--text);
-    font-size: 15px;
-  }
-  .search-box input::placeholder { color: var(--text2); }
-
-  /* ===== Лоадер ===== */
-  #loader {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 200px;
-    gap: 16px;
-  }
-  .spinner {
-    width: 44px; height: 44px;
-    border: 3px solid var(--bg3);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .loader-text { color: var(--text2); font-size: 14px; }
-
-  /* ===== Контент ===== */
-  #app { padding: 8px 16px; }
-
-  /* ===== Заголовок категории ===== */
-  .cat-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 20px 0 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--card-border);
-  }
-  .cat-header h3 {
-    font-size: 17px;
-    font-weight: 700;
-    color: var(--text);
-    flex: 1;
-  }
-  .cat-badge {
-    background: rgba(123,104,238,0.15);
-    color: var(--accent2);
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 20px;
-    font-weight: 600;
-  }
-
-  /* ===== Сетка товаров ===== */
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-  }
-
-  /* ===== Карточка товара ===== */
-  .card {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: var(--radius);
-    padding: 14px 12px;
-    cursor: pointer;
-    transition: all 0.18s ease;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(123,104,238,0.08), transparent);
-    opacity: 0;
-    transition: opacity 0.18s;
-  }
-  .card:active {
-    transform: scale(0.96);
-    border-color: var(--accent);
-    box-shadow: var(--shadow);
-  }
-  .card:active::before { opacity: 1; }
-  .card-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text);
-    line-height: 1.3;
-  }
-  .card-price {
-    font-size: 15px;
-    font-weight: 800;
-    color: var(--accent2);
-  }
-  .card-price small {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text2);
-  }
-
-  /* ===== Нижняя навигация ===== */
-  .nav {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    background: var(--bg2);
-    border-top: 1px solid var(--card-border);
-    display: flex;
-    padding: 8px 0 env(safe-area-inset-bottom, 8px);
-    z-index: 200;
-  }
-  .nav-btn {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    padding: 6px;
-    cursor: pointer;
-    color: var(--text2);
-    font-size: 10px;
-    transition: color 0.15s;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .nav-btn.active { color: var(--accent2); }
-  .nav-icon { font-size: 20px; }
-
-  /* ===== Пусто ===== */
-  .empty {
-    text-align: center;
-    padding: 40px 20px;
-    color: var(--text2);
-  }
-  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --bg3: #1f2937;
+  --accent: #7b68ee;
+  --accent2: #9b8aff;
+  --text: #e6edf3;
+  --text2: #8b949e;
+  --card-bg: #1a1f2e;
+  --card-border: rgba(123,104,238,0.2);
+  --shadow: 0 4px 20px rgba(123,104,238,0.15);
+  --radius: 14px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, 'SF Pro Display', Segoe UI, Roboto, sans-serif;
+  min-height: 100vh;
+  padding-bottom: 70px;
+}
+.header {
+  background: linear-gradient(135deg, #0d1117, #1a1030);
+  padding: 20px 16px 16px;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  border-bottom: 1px solid var(--card-border);
+  backdrop-filter: blur(10px);
+}
+.logo {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  background: linear-gradient(90deg, #7b68ee, #ff6b9d, #7b68ee, #00d4ff);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 3s linear infinite;
+  text-transform: uppercase;
+}
+@keyframes shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+.logo-sub {
+  font-size: 11px;
+  color: var(--text2);
+  letter-spacing: 2px;
+  margin-top: 2px;
+  text-transform: uppercase;
+}
+.search-wrap {
+  padding: 12px 16px 8px;
+  position: sticky;
+  top: 80px;
+  z-index: 99;
+  background: var(--bg);
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  background: var(--bg2);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  gap: 10px;
+  transition: border-color 0.2s;
+}
+.search-box:focus-within { border-color: var(--accent); }
+.search-icon { font-size: 16px; flex-shrink: 0; color: var(--text2); }
+.search-box input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 15px;
+}
+.search-box input::placeholder { color: var(--text2); }
+#loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  gap: 16px;
+}
+.spinner {
+  width: 44px; height: 44px;
+  border: 3px solid var(--bg3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loader-text { color: var(--text2); font-size: 14px; }
+#app { padding: 8px 16px; }
+.cat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--card-border);
+}
+.cat-header h3 { font-size: 17px; font-weight: 700; color: var(--text); flex: 1; }
+.cat-badge {
+  background: rgba(123,104,238,0.15);
+  color: var(--accent2);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 14px 12px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(123,104,238,0.08), transparent);
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+.card:active {
+  transform: scale(0.96);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+}
+.card:active::before { opacity: 1; }
+.card-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; }
+.card-price { font-size: 15px; font-weight: 800; color: var(--accent2); }
+.card-price small { font-size: 11px; font-weight: 500; color: var(--text2); }
+.nav {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: var(--bg2);
+  border-top: 1px solid var(--card-border);
+  display: flex;
+  padding: 8px 0 env(safe-area-inset-bottom, 8px);
+  z-index: 200;
+}
+.nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--text2);
+  font-size: 10px;
+  transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-btn.active { color: var(--accent2); }
+.nav-icon { font-size: 20px; }
+.empty { text-align: center; padding: 40px 20px; color: var(--text2); }
+.empty-icon { font-size: 48px; margin-bottom: 12px; }
 </style>
 </head>
 <body>
-
 <div class="header">
   <div class="logo">DONATEX</div>
   <div class="logo-sub">Gaming Shop</div>
 </div>
-
 <div class="search-wrap">
   <div class="search-box">
     <span class="search-icon">🔍</span>
     <input id="q" type="search" placeholder="Поиск товаров..." autocomplete="off">
   </div>
 </div>
-
 <div id="app">
   <div id="loader">
     <div class="spinner"></div>
     <div class="loader-text">Загрузка каталога...</div>
   </div>
 </div>
-
 <div class="nav">
   <div class="nav-btn active" onclick="scrollToTop()">
     <span class="nav-icon">🏠</span>
@@ -2364,7 +2292,6 @@ WEBAPP_HTML = """<!doctype html>
     <span>Закрыть</span>
   </div>
 </div>
-
 <script>
 const tg = Telegram.WebApp;
 tg.ready();
@@ -2398,13 +2325,11 @@ function render(f) {
     if (!ps.length) return;
     found += ps.length;
 
-    // Заголовок категории
     const header = document.createElement('div');
     header.className = 'cat-header';
     header.innerHTML = `<h3>${cat.name}</h3><span class="cat-badge">${ps.length}</span>`;
     app.appendChild(header);
 
-    // Сетка карточек
     const grid = document.createElement('div');
     grid.className = 'grid';
 
@@ -2471,7 +2396,6 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", PORT).start()
     log.info("web on :%s", PORT)
-
     tasks = [asyncio.create_task(saver_loop()), asyncio.create_task(balance_watcher()),
              asyncio.create_task(keepalive())]
     await load_catalog(force=True)
