@@ -890,21 +890,33 @@ def match_game(game):
 FF_REGIONS = ["sg", "ind", "br", "us", "vn", "th", "tw", "id", "me", "pk", "cis", "bd", "ru"]
 
 async def fetch_ff_player(uid: str, region: str = "sg"):
-    """Получает данные игрока Free Fire через публичный API."""
+    """
+    Пробует несколько живых API с GitHub.
+    Возвращает словарь с данными или None.
+    """
     apis = [
-        f"https://ff-info-api.vercel.app/player?uid={uid}&region={region}",
-        f"https://freefireinfo.vercel.app/api?uid={uid}&region={region}",
-        f"https://ff-info.vercel.app/api/player?uid={uid}&region={region}",
+        # BIELVENDAs/free-ff-api — самый надёжный вариант
+        f"https://free-ff-api-src-5plp.onrender.com/api/v1/account?region={region}&uid={uid}",
+        # PRINCE-LKTEAM/Free-Fire-API — запасной вариант через поиск
+        f"https://freefireinfo-zy9l.onrender.com/api/v1/search-players?keyword={uid}&server={region}",
     ]
-    async with aiohttp.ClientSession() as s:
+    async with aiohttp.ClientSession() as session:
         for url in apis:
             try:
-                async with s.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
-                    if r.status == 200:
-                        d = await r.json(content_type=None)
-                        if isinstance(d, dict) and (d.get("basicinfo") or d.get("AccountInfo") or d.get("name")):
-                            return d
-            except Exception:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=12)) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json(content_type=None)
+                    # Приводим ответ к единому виду, который ждёт ваш fmt_ff_profile
+                    if isinstance(data, dict):
+                        # BIELVENDAs обычно отдаёт {"profileInfo": {...}, ...}
+                        if "profileInfo" in data:
+                            return data
+                        # PRINCE-LKTEAM отдаёт {"infos": [ {...} ]}
+                        if "infos" in data and data["infos"]:
+                            return {"basicinfo": data["infos"][0]}
+            except Exception as e:
+                log.debug("FF API %s: %s", url, e)
                 continue
     return None
 
