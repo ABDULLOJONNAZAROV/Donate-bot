@@ -645,29 +645,73 @@ async def load_catalog(force=False):
                 async with s.get(f"{API}/products", params=params, headers=HEADERS,
                                  timeout=aiohttp.ClientTimeout(total=30)) as r:
                     return await r.json(content_type=None)
-            data = await get({"kind": "topup", "limit": 500})
+
+            # === ИСПРАВЛЕНИЕ: грузим ВСЕ товары, а не только первые 500 ===
+            all_items, seen = [], set()
+            LIMIT = 500
+
+            async def pull(extra):
+                d = await get({"kind": "topup", "limit": LIMIT, **extra})
+                chunk = d.get("items", []) if isinstance(d, dict) else []
+                added = 0
+                for p in chunk:
+                    pid = p.get("product_id")
+                    if pid not in seen:
+                        seen.add(pid)
+                        all_items.append(p)
+                        added += 1
+                return added, len(chunk)
+
+            offset = 0
+            for _ in range(60):                      # пагинация через offset
+                added, n = await pull({"offset": offset})
+                if added == 0 or n < LIMIT:
+                    break
+                offset += LIMIT
+
+            if len(all_items) <= LIMIT:              # если offset не поддерживается
+                page = 2
+                for _ in range(60):                  # пагинация через page
+                    added, n = await pull({"page": page})
+                    if added == 0 or n < LIMIT:
+                        break
+                    page += 1
+
+            if len(all_items) <= LIMIT:              # запасной вариант: большой limit
+                d = await get({"kind": "topup", "limit": 5000})
+                for p in (d.get("items", []) if isinstance(d, dict) else []):
+                    pid = p.get("product_id")
+                    if pid not in seen:
+                        seen.add(pid)
+                        all_items.append(p)
+
+            log.info("catalog: товаров загружено %s", len(all_items))
+
             stars = await get({"kind": "telegram_stars", "limit": 5})
             prem = await get({"kind": "telegram_premium", "limit": 10})
-        new_cat, new_prod = {}, {}
-        for p in data.get("items", []):
-            cid = p.get("category_id")
-            new_cat.setdefault(cid, {"name": p.get("category_name") or str(cid), "products": []})
-            p["price_tjs"] = tjs(float(p.get("price_usd", 0)))
-            new_cat[cid]["products"].append(p)
-            new_prod[sid(p["product_id"])] = p
-        new_special = {"stars": None, "premium": {}}
-        for it in stars.get("items", []):
-            if it.get("product_id") == "tg-stars":
-                new_special["stars"] = {"unit": float(it["price_usd"]),
-                                        "min": it.get("min_quantity", 50),
-                                        "max": it.get("max_quantity", 10000)}
-        new_special["premium"] = {p["product_id"]: p for p in prem.get("items", [])}
-        catalog, prod_short, special = new_cat, new_prod, new_special
-        cat_short = {sid(cid): cid for cid in catalog}
-        cat_at = time.time()
+
+            new_cat, new_prod = {}, {}
+            for p in all_items:
+                cid = p.get("category_id")
+                new_cat.setdefault(cid, {"name": p.get("category_name") or str(cid), "products": []})
+                p["price_tjs"] = tjs(float(p.get("price_usd", 0)))
+                new_cat[cid]["products"].append(p)
+                new_prod[sid(p["product_id"])] = p
+
+            new_special = {"stars": None, "premium": {}}
+            for it in stars.get("items", []):
+                if it.get("product_id") == "tg-stars":
+                    new_special["stars"] = {"unit": float(it["price_usd"]),
+                                            "min": it.get("min_quantity", 50),
+                                            "max": it.get("max_quantity", 10000)}
+            new_special["premium"] = {p["product_id"]: p for p in prem.get("items", [])}
+
+            catalog, prod_short, special = new_cat, new_prod, new_special
+            cat_short = {sid(cid): cid for cid in catalog}
+            cat_at = time.time()
+            log.info("catalog: категорий %s", len(catalog))
     except Exception as e:
         log.error("catalog: %s", e)
-
 
 def ptitle(p):
     return str(p.get("title") or p.get("name") or p.get("product_id"))
