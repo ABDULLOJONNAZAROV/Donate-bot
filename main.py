@@ -894,27 +894,37 @@ async def fetch_ff_player(uid: str, region: str = "sg"):
     Пробует несколько живых API с GitHub.
     Возвращает словарь с данными или None.
     """
+    # Регионы в BIELVENDAs пишутся заглавными (CIS, IND, BR и т.д.)
+    reg_upper = region.upper()
     apis = [
-        # BIELVENDAs/free-ff-api — самый надёжный вариант
-        f"https://free-ff-api-src-5plp.onrender.com/api/v1/account?region={region}&uid={uid}",
-        # PRINCE-LKTEAM/Free-Fire-API — запасной вариант через поиск
-        f"https://freefireinfo-zy9l.onrender.com/api/v1/search-players?keyword={uid}&server={region}",
+        # 1. BIELVENDAs/free-ff-api — самый надёжный вариант
+        f"https://free-ff-api-src-5plp.onrender.com/api/v1/account?region={reg_upper}&uid={uid}",
+        # 2. PRINCE-LKTEAM — запасной вариант (поиск по UID как по ключевому слову)
+        f"https://freefireinfo-zy9l.onrender.com/api/v1/search-players?keyword={uid}&server={reg_upper}",
     ]
+    
     async with aiohttp.ClientSession() as session:
         for url in apis:
             try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=12)) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:
                         continue
                     data = await resp.json(content_type=None)
-                    # Приводим ответ к единому виду, который ждёт ваш fmt_ff_profile
-                    if isinstance(data, dict):
-                        # BIELVENDAs обычно отдаёт {"profileInfo": {...}, ...}
-                        if "profileInfo" in data:
-                            return data
-                        # PRINCE-LKTEAM отдаёт {"infos": [ {...} ]}
-                        if "infos" in data and data["infos"]:
-                            return {"basicinfo": data["infos"][0]}
+                    
+                    # --- Приводим ответ BIELVENDAs к формату, который ждёт fmt_ff_profile ---
+                    if isinstance(data, dict) and "basicInfo" in data:
+                        return {
+                            "basicinfo": data["basicInfo"],
+                            "profileInfo": data.get("profileInfo", {}),
+                            "claninfo": data.get("clanBasicInfo", {}), # если есть
+                            "petinfo": data.get("petInfo", {}),
+                            "socialinfo": data.get("socialInfo", {}),
+                        }
+                    
+                    # --- Приводим ответ PRINCE-LKTEAM к тому же формату ---
+                    if isinstance(data, dict) and "infos" in data and data["infos"]:
+                        return {"basicinfo": data["infos"][0]}
+                        
             except Exception as e:
                 log.debug("FF API %s: %s", url, e)
                 continue
