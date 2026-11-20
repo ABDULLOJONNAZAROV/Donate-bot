@@ -891,55 +891,59 @@ FF_REGIONS = ["sg", "ind", "br", "us", "vn", "th", "tw", "id", "me", "pk", "cis"
 
 async def fetch_ff_player(uid: str, region: str = "sg"):
     """
-    Пробует несколько живых API с GitHub.
-    Возвращает словарь с данными или None.
+    Получает данные игрока через freefire-api-six.vercel.app.
+    Возвращает словарь, совместимый с fmt_ff_profile, или None.
     """
-    # Регионы в BIELVENDAs пишутся заглавными (CIS, IND, BR и т.д.)
-    reg_upper = region.upper()
-    apis = [
-        # 1. BIELVENDAs/free-ff-api — самый надёжный вариант
-        f"https://free-ff-api-src-5plp.onrender.com/api/v1/account?region={reg_upper}&uid={uid}",
-        # 2. PRINCE-LKTEAM — запасной вариант (поиск по UID как по ключевому слову)
-        f"https://freefireinfo-zy9l.onrender.com/api/v1/search-players?keyword={uid}&server={reg_upper}",
-    ]
-    
-    async with aiohttp.ClientSession() as session:
-        for url in apis:
-            try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status != 200:
-                        continue
-                    data = await resp.json(content_type=None)
-                    
-                    # --- Приводим ответ BIELVENDAs к формату, который ждёт fmt_ff_profile ---
-                    if isinstance(data, dict) and "basicInfo" in data:
-                        return {
-                            "basicinfo": data["basicInfo"],
-                            "profileInfo": data.get("profileInfo", {}),
-                            "claninfo": data.get("clanBasicInfo", {}), # если есть
-                            "petinfo": data.get("petInfo", {}),
-                            "socialinfo": data.get("socialInfo", {}),
-                        }
-                    
-                    # --- Приводим ответ PRINCE-LKTEAM к тому же формату ---
-                    if isinstance(data, dict) and "infos" in data and data["infos"]:
-                        return {"basicinfo": data["infos"][0]}
-                        
-            except Exception as e:
-                log.debug("FF API %s: %s", url, e)
-                continue
+    # Vercel API ожидает регион в нижнем регистре (ind, sg, cis и т.д.)
+    server = region.lower()
+    url = f"https://freefire-api-six.vercel.app/get_player_personal_show?server={server}&uid={uid}"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            log.info("FF API [Vercel] запрос: %s", url)
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    log.warning("FF API [Vercel] статус: %s", resp.status)
+                    return None
+
+                data = await resp.json(content_type=None)
+
+                # API возвращает {"success": true, "data": {...}}.
+                if not isinstance(data, dict) or not data.get("success"):
+                    log.warning("FF API [Vercel] ответ без success: %s", str(data)[:200])
+                    return None
+
+                # Вся информация об игроке находится внутри ключа "data".
+                player_data = data.get("data")
+                if not isinstance(player_data, dict):
+                    return None
+
+                # Оборачиваем в "basicinfo", чтобы ваш fmt_ff_profile смог прочитать поля.
+                return {"basicinfo": player_data}
+
+    except asyncio.TimeoutError:
+        log.warning("FF API [Vercel] таймаут (сервер Vercel мог «проснуться»)")
+    except Exception as e:
+        log.warning("FF API [Vercel] ошибка: %s", e)
+
     return None
 
 
 def fmt_ff_profile(d: dict, uid: str) -> str:
-    """Форматирует ответ API в красивое сообщение."""
-    # Поддержка разных форматов API
+    # Поддержка формата от Vercel (ключ "basicinfo") и старых форматов
     basic = d.get("basicinfo") or d.get("AccountInfo") or d
-    clan  = d.get("claninfo")  or d.get("GuildInfo")  or {}
-    pet   = d.get("petinfo")   or d.get("PetInfo")    or {}
-    rank  = d.get("rankinfo")  or d.get("RankInfo")   or {}
-    social = d.get("socialinfo") or d.get("SocialInfo") or {}
+    
+    # Пытаемся найти данные гильдии и питомца в разных возможных ключах
+    clan = d.get("claninfo") or d.get("GuildInfo") or basic.get("clan") or basic.get("guild") or {}
+    pet  = d.get("petinfo") or d.get("PetInfo") or basic.get("pet") or {}
+    rank = d.get("rankinfo") or d.get("RankInfo") or basic.get("rank") or {}
+    social = d.get("socialinfo") or d.get("SocialInfo") or basic.get("social") or {}
 
+    # ... дальше ваш существующий код без изменений ...
     def g(*keys):
         for k in keys:
             v = basic.get(k) or d.get(k)
