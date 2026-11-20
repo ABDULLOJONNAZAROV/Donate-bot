@@ -991,26 +991,65 @@ async def cb_ref(c):
 GAMES_PER_PAGE = 10
 
 
-def match_game(game):
-    for cid, g in catalog.items():
-        hay = (str(cid) + " " + g["name"]).lower().replace("_", " ")
-        if game == "ff_cis" and "free fire" in hay and ("cis" in hay or "снг" in hay) and "indon" not in hay:
-            return cid
-        if game == "ff_id" and "free fire" in hay and "indon" in hay:
-            return cid
-        if game == "pubg" and "pubg" in hay:
-            return cid
-    return None
+def _norm(s):
+    s = str(s).lower().replace("ё", "е")
+    s = re.sub(r"[_\-–—/.,:;()\[\]]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
 
+def match_game(game):
+    game = (game or "").strip()
+    ff_plain = None      # "Free Fire" без региона — запасной вариант для СНГ
+    pubg_list = []
+
+    for cid, g in catalog.items():
+        hay = _norm(f"{cid} {g['name']}")
+        compact = re.sub(r"[^a-z0-9а-я]", "", hay)
+
+        is_ff = ("free fire" in hay or "freefire" in compact
+                 or "фри фаер" in hay or "фри файр" in hay
+                 or re.search(r"\bff\b", hay))
+        is_pubg = ("pubg" in compact or "пабг" in hay
+                   or "playerunknown" in compact or "battlegrounds" in compact)
+
+        is_id = ("indon" in hay or "индонез" in hay
+                 or re.search(r"\bid\b", hay))
+        is_cis = ("cis" in hay or "снг" in hay or "russia" in hay
+                  or "росси" in hay or re.search(r"\bru\b", hay))
+
+        if game == "ff_cis" and is_ff and not is_id:
+            if is_cis:
+                return cid
+            if ff_plain is None:
+                ff_plain = cid
+        elif game == "ff_id" and is_ff and is_id:
+            return cid
+        elif game == "pubg" and is_pubg:
+            pubg_list.append((cid, hay))
+
+    if game == "ff_cis":
+        return ff_plain
+    if game == "pubg" and pubg_list:
+        def score(h):
+            s = 0
+            if "global" in h or "world" in h: s += 2
+            if "mobile" in h: s += 1
+            if re.search(r"\b(kr|vn|tw|jp|korea|vietnam|taiwan|japan)\b", h): s -= 3
+            return s
+        pubg_list.sort(key=lambda x: -score(x[1]))
+        return pubg_list[0][0]
+    return None
 
 @dp.callback_query(F.data.startswith("game:"))
 async def cb_game(c):
     await c.answer()
     await load_catalog()
-    found = match_game(c.data.split(":")[1])
+    key = c.data.split(":", 1)[1].strip()
+    found = match_game(key)
     if found:
         await show_category(c, found)
     else:
+        log.warning("game '%s' не найден. Категории: %s",
+                    key, [g["name"] for g in catalog.values()])
         await show_all_games(c, 0)
 
 
