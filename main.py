@@ -383,8 +383,11 @@ def btn(text, data):
 
 
 def lbtn(text, url):
-    """Кнопка-ссылка"""
-    return InlineKeyboardButton(text=text, url=url)
+    fields = getattr(InlineKeyboardButton, "model_fields", {})
+    options = {"text": text, "url": url}
+    if "style" in fields:
+        options["style"] = "primary"
+    return InlineKeyboardButton(**options)
 
 
 def is_admin(uid):
@@ -812,12 +815,16 @@ async def send_menu(msg, user):
     # Кнопка новостей (пункт 11)
     news_ch = get_news_channel(uid)
     if news_ch:
-        rows.append([btn(t(uid, "news"), "news_channel")])
+        rows.append([lbtn(t(uid, "news"), news_ch)])
+
+    if REVIEWS_CHANNEL:
+        ch_url = REVIEWS_CHANNEL if REVIEWS_CHANNEL.startswith("http") else f"https://t.me/{REVIEWS_CHANNEL.lstrip('@')}"
+        rows.append([lbtn(t(uid, "reviews_btn"), ch_url)])
 
     if is_admin(uid):
         rows.append([btn("🛠 Панели админ", "admin")])
 
-    markup = kb(rows)
+    await msg.answer(welcome_text, reply_markup=kb(rows))
 
     # Добавляем кнопку отзывов если есть канал (пункт 3)
     if REVIEWS_CHANNEL:
