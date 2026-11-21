@@ -795,13 +795,10 @@ async def send_menu(msg, user):
     u = get_user(uid, user.full_name or "", uname)
     user_state.pop(uid, None)
 
-    # У каждого пользователя при открытии меню снимаем старую кнопку Shop
     await clear_reply_keyboard(msg.chat.id)
-
     welcome_text = t(uid, "welcome", bal=f"{u['balance']:.2f}")
 
     rows = [
-        # Кнопка "Популярное" первой (пункт 2)
         [btn(t(uid, "popular"), "popular")],
         [btn("🔥 FF СНГ 💎", "game:ff_cis"), btn("🇮🇩 FF Индонезия 💎", "game:ff_id")],
         [btn("🎯 PUBG Mobile UC 🏆", "game:pubg")],
@@ -811,30 +808,23 @@ async def send_menu(msg, user):
         [btn(t(uid, "support"), "support"), btn(t(uid, "lang"), "lang")],
     ]
 
-    # Кнопка новостей (пункт 11)
+    # 📢 Тугмаи хабарҳо
     news_ch = get_news_channel(uid)
     if news_ch:
         rows.append([lbtn(t(uid, "news"), news_ch)])
 
+    # ⭐ Тугмаи баррасиҳо — ба ҳамон rows илова мекунем
     if REVIEWS_CHANNEL:
-        ch_url = REVIEWS_CHANNEL if REVIEWS_CHANNEL.startswith("http") else f"https://t.me/{REVIEWS_CHANNEL.lstrip('@')}"
+        ch_url = REVIEWS_CHANNEL if REVIEWS_CHANNEL.startswith("http") \
+                 else f"https://t.me/{REVIEWS_CHANNEL.lstrip('@')}"
         rows.append([lbtn(t(uid, "reviews_btn"), ch_url)])
 
+    # 🛠 Тугмаи админ
     if is_admin(uid):
         rows.append([btn("🛠 Панели админ", "admin")])
 
+    # ✅ Фақат ЯК паём фиристода мешавад
     await msg.answer(welcome_text, reply_markup=kb(rows))
-
-    # Добавляем кнопку отзывов если есть канал (пункт 3)
-    if REVIEWS_CHANNEL:
-        ch_url = REVIEWS_CHANNEL if REVIEWS_CHANNEL.startswith("http") else f"https://t.me/{REVIEWS_CHANNEL.lstrip('@')}"
-        # Добавляем кнопку-ссылку — делаем отдельное сообщение с этой кнопкой
-        await msg.answer(welcome_text, reply_markup=kb(
-            rows[:-1] + [[lbtn(t(uid, "reviews_btn"), ch_url)]] + [rows[-1]] if is_admin(uid)
-            else rows + [[lbtn(t(uid, "reviews_btn"), ch_url)]]
-        ))
-    else:
-        await msg.answer(welcome_text, reply_markup=markup)
 
 
 @dp.message(CommandStart())
