@@ -4102,6 +4102,46 @@ async def h_webapp_game_finish(request):
         "score": int(scores.get(str(uid), {}).get("score", 0)),
         "leaderboard": webapp_leaderboard(),
     })
+  # ===== WEB LOGIN для сайта =====
+async def h_web_login(request):
+    try:
+        data = await request.json()
+        phone = str(data.get("phone", "")).strip()
+        name  = str(data.get("name",  "")).strip()
+        if not phone or not name:
+            return web.json_response({"message": "Заполните имя и телефон"}, status=400)
+
+        uid = None
+        for u_id, u in db["users"].items():
+            if u.get("phone") == phone:
+                uid = u_id
+                break
+
+        if not uid:
+            uid = "web_" + hashlib.md5(phone.encode()).hexdigest()[:8]
+            db["users"][uid] = dict(DEFAULT_USER)
+            db["users"][uid]["name"]  = name
+            db["users"][uid]["phone"] = phone
+            save_db()
+
+        u     = db["users"][uid]
+        token = secrets.token_hex(16)
+        db["meta"][f"web_token_{token}"] = {"uid": uid, "ts": now_ts()}
+        save_db()
+
+        return web.json_response({
+            "ok":    True,
+            "token": token,
+            "user": {
+                "id":      uid,
+                "name":    u.get("name", name),
+                "phone":   phone,
+                "bal":     round(u.get("balance", 0), 2),
+                "isAdmin": is_admin(ADMIN_ID)
+            }
+        })
+    except Exception as e:
+        return web.json_response({"message": str(e)}, status=500)
 
 
 async def main():
