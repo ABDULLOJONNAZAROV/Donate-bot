@@ -1,4 +1,4 @@
-import asyncio
+LPimport asyncio
 import csv
 import hashlib
 import html
@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-
+from aiogram.types import WebAppInfo
 import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
@@ -47,7 +47,7 @@ RECEIPTS_CHANNEL_ID = int(os.environ.get("RECEIPTS_CHANNEL_ID", "0"))
 MAX_TOPUP = float(os.environ.get("MAX_TOPUP", "5000"))
 TZ = timezone(timedelta(hours=5))  # Душанбе
 
-# --- Новые переменные окружения ---
+# --- Новые переменные окружения ---да
 # Канал для отзывов (например @donatex_reviews) — ссылка-кнопка в /start
 REVIEWS_CHANNEL = os.environ.get("REVIEWS_CHANNEL", "")
 # ID канала для пересылки отзывов (например -1001234567890)
@@ -887,6 +887,8 @@ async def send_menu(msg, user):
 
     # Компактное главное меню: связанные разделы расположены в два столбца.
     rows = [
+        [InlineKeyboardButton(text="⚡ Открыть DONATEX Mini App",
+  web_app=WebAppInfo(url=EXTERNAL_URL + "/webapp/"))],
         [btn(t(uid, "popular"), "popular"), btn(t(uid, "all_games"), "allp:0")],
         [btn("🔥 FF СНГ 💎", "game:ff_cis"), btn("🇮🇩 FF Индонезия 💎", "game:ff_id")],
         [btn("🎯 PUBG Mobile US 🏆", "game:pubg_us"), btn(t(uid, "stars"), "tg_stars")],
@@ -3518,14 +3520,522 @@ async def h_web_login(request):
         log.error("h_web_login error: %s", e)
         return web.json_response({"message": str(e)}, status=500)
 
+# ═══════════════════════════════════════════════════════════════════
+#  DONATEX Mini App — дополнения к main.py
+#
+#  Инструкция по интеграции:
+#  1. Добавьте этот код в конец main.py (перед async def main())
+#  2. В функции main() добавьте новые маршруты в app.add_routes([...])
+#  3. Скопируйте donatex_miniapp.html в папку проекта
+#  4. В send_menu() добавьте кнопку WebApp (см. конец файла)
+# ═══════════════════════════════════════════════════════════════════
+
+import hashlib
+import hmac
+import json
+import os
+from urllib.parse import parse_qsl
+from pathlib import Path
+from aiohttp import web
+from aiogram.types import WebAppInfo, InlineKeyboardButton
+
+
+# ─── Путь к HTML файлу Mini App ───────────────────────────────────
+MINIAPP_HTML = Path(__file__).resolve().parent / "donatex_miniapp.html"
+
+
+# ─── Вспомогательная: проверка подписи Telegram WebApp ────────────
+def verify_tg_initdata(init_data: str, bot_token: str) -> dict | None:
+    """
+    Проверяет подпись initData от Telegram WebApp.
+    Возвращает dict с данными пользователя или None если подпись неверна.
+    """
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop("hash", "")
+        # data_check_string: отсортированные пары key=value через \n
+        data_check = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
+        # secret_key = HMAC-SHA256(bot_token, "WebAppData")
+        secret = hmac.new("WebAppData".encode(), bot_token.encode(), hashlib.sha256).digest()
+        # Вычисляем ожидаемый хэш
+        expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, received_hash):
+            return None
+        # Декодируем user
+        user_json = pairs.get("user", "{}")
+        return json.loads(user_json)
+    except Exception as e:
+        log.warning("verify_tg_initdata error: %s", e)
+        return None
+
+
+def get_or_create_user_by_tg(tg_user: dict) -> tuple[str, dict]:
+    """Находит или создаёт пользователя по Telegram user dict."""
+    uid = str(tg_user.get("id", ""))
+    if not uid:
+        return "", {}
+    u = get_user(int(uid), 
+                 tg_user.get("first_name", "") + (" " + tg_user.get("last_name", "") if tg_user.get("last_name") else ""),
+                 tg_user.get("username", ""))
+    return uid, u
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  МАРШРУТЫ MINI APP
+# ═══════════════════════════════════════════════════════════════════
+
+async def h_miniapp_html(request: web.Request) -> web.Response:
+    """Отдаёт HTML страницу Mini App."""
+    if not MINIAPP_HTML.exists():
+        return web.Response(text="Mini App HTML not found. Place donatex_miniapp.html next to main.py.", status=404)
+    return web.FileResponse(MINIAPP_HTML)
+
+
+async def h_webapp_init(request: web.Request) -> web.Response:
+    """
+    POST /webapp/api/init
+    Body: { initData: string }
+    Response: { ok: bool, user: { id, name, balance, lang, orders } }
+    """
+    try:
+        body = await request.json()
+        init_data = body.get("initData", "")
+
+        # Проверяем подпись (только в production)
+        tg_user = None
+        if init_data:
+            tg_user = verify_tg_initdata(init_data, BOT_TOKEN)
+            if tg_user is None and not os.environ.get("DEV_MODE"):
+                return web.json_response({"message": "Invalid initData"}, status=401)
+
+        if tg_user:
+            uid, u = get_or_create_user_by_tg(tg_user)
+        else:
+            # DEV_MODE: принимаем без проверки, читаем user из initData вручную
+            pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+            raw_user = json.loads(pairs.get("user", "{}"))
+            uid = str(raw_user.get("id", "dev"))
+            u = get_user(int(uid) if uid.isdigit() else 0,
+                         raw_user.get("first_name", "Dev"),
+                         raw_user.get("username", ""))
+
+        # Считаем кол-во заказов пользователя
+        order_count = sum(1 for o in db["orders"] if str(o.get("uid")) == uid)
+
+        return web.json_response({
+            "ok": True,
+            "user": {
+                "id":      uid,
+                "name":    u.get("name", ""),
+                "balance": round(float(u.get("balance", 0)), 2),
+                "lang":    u.get("lang", "ru"),
+                "orders":  order_count,
+            }
+        })
+    except Exception as e:
+        log.error("h_webapp_init: %s", e)
+        return web.json_response({"message": str(e)}, status=500)
+
+
+async def h_webapp_catalog(request: web.Request) -> web.Response:
+    """
+    GET /webapp/api/catalog
+    Response: { categories: [{ id, name, icon, products: [...] }] }
+    """
+    try:
+        await load_catalog()
+
+        ICONS = {
+            "free fire": "🔥", "garena": "🔥", "freefire": "🔥",
+            "pubg": "🎯", "mobile legends": "⚔️", "mlbb": "⚔️",
+            "genshin": "✨", "honor of kings": "👑", "clash": "🏰",
+            "telegram": "⭐", "stars": "⭐", "premium": "💜",
+        }
+
+        def pick_icon(name: str) -> str:
+            nl = name.lower()
+            for key, ic in ICONS.items():
+                if key in nl:
+                    return ic
+            return "🎮"
+
+        result = []
+        for cid, cat in catalog.items():
+            cat_name = cat.get("name", str(cid))
+            icon = pick_icon(cat_name)
+            prods = []
+            for p in cat.get("products", []):
+                prods.append({
+                    "product_id": p.get("product_id"),
+                    "title":      ptitle(p, "ru"),
+                    "price_tjs":  round(float(p.get("price_tjs", 0)), 2),
+                    "price_usd":  round(float(p.get("price_usd", 0)), 2),
+                    "type":       p.get("kind", "topup"),
+                })
+            if prods:
+                result.append({
+                    "id":       str(cid),
+                    "name":     cat_name,
+                    "icon":     icon,
+                    "products": prods,
+                })
+
+        # Stars и Premium в отдельную категорию
+        star_prods = []
+        if special.get("stars"):
+            s = special["stars"]
+            for qty in [50, 100, 250, 500, 1000, 2500]:
+                if s["min"] <= qty <= s["max"]:
+                    star_prods.append({
+                        "product_id": f"tg-stars-{qty}",
+                        "title":      f"{qty} Stars",
+                        "price_tjs":  round(qty * s["unit"] * usd_tjs * (1 + MARGIN), 2),
+                        "price_usd":  round(qty * s["unit"], 2),
+                        "type":       "stars",
+                    })
+        for pid, p in special.get("premium", {}).items():
+            star_prods.append({
+                "product_id": pid,
+                "title":      ptitle(p, "ru"),
+                "price_tjs":  round(float(p.get("price_usd", 0)) * usd_tjs * (1 + MARGIN), 2),
+                "price_usd":  round(float(p.get("price_usd", 0)), 2),
+                "type":       "premium",
+            })
+        if star_prods:
+            result.append({
+                "id":       "stars",
+                "name":     "Telegram Stars ⭐",
+                "icon":     "⭐",
+                "products": star_prods,
+            })
+
+        return web.json_response({"categories": result})
+    except Exception as e:
+        log.error("h_webapp_catalog: %s", e)
+        return web.json_response({"message": str(e)}, status=500)
+
+
+async def h_webapp_nick(request: web.Request) -> web.Response:
+    """
+    GET /webapp/api/nick?product_id=...&player_id=...
+    Response: { nick: string }
+    """
+    try:
+        product_id = request.rel_url.query.get("product_id", "")
+        player_id  = request.rel_url.query.get("player_id", "")
+        if not product_id or not player_id:
+            return web.json_response({"nick": ""})
+
+        # Находим продукт в каталоге
+        product = None
+        for cat in catalog.values():
+            for p in cat.get("products", []):
+                if p.get("product_id") == product_id:
+                    product = p
+                    break
+            if product:
+                break
+
+        nick = await lookup_player_nick(product or {"product_id": product_id}, player_id)
+        return web.json_response({"nick": nick})
+    except Exception as e:
+        log.warning("h_webapp_nick: %s", e)
+        return web.json_response({"nick": ""})
+
+
+async def h_webapp_order(request: web.Request) -> web.Response:
+    """
+    POST /webapp/api/order
+    Headers: X-TG-Init-Data
+    Body: { product_id, player_id, price_tjs }
+    Response: { ok, order_id, balance }
+    """
+    try:
+        init_data = request.headers.get("X-TG-Init-Data", "")
+        body = await request.json()
+
+        # Аутентификация
+        tg_user = verify_tg_initdata(init_data, BOT_TOKEN)
+        if tg_user is None and not os.environ.get("DEV_MODE"):
+            return web.json_response({"message": "Unauthorized"}, status=401)
+        if tg_user is None:
+            pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+            tg_user = json.loads(pairs.get("user", "{}"))
+
+        uid_int = int(tg_user.get("id", 0))
+        uid = str(uid_int)
+        u = get_user(uid_int)
+
+        # Находим продукт
+        product_id = body.get("product_id", "")
+        player_id  = str(body.get("player_id", ""))
+        price_tjs  = float(body.get("price_tjs", 0))
+
+        product = None
+        for cat in catalog.values():
+            for p in cat.get("products", []):
+                if p.get("product_id") == product_id:
+                    product = p
+                    break
+            if product:
+                break
+
+        if not product:
+            # Поищем в special
+            if product_id in special.get("premium", {}):
+                product = special["premium"][product_id]
+            elif product_id.startswith("tg-stars-"):
+                qty = int(product_id.split("-")[-1])
+                s = special.get("stars") or {}
+                product = {"product_id": product_id, "title": f"{qty} Stars", 
+                           "price_usd": qty * s.get("unit", 0.02)}
+
+        if not product:
+            return web.json_response({"message": "Товар не найден"}, status=404)
+
+        # Проверяем баланс
+        price = round(float(product.get("price_tjs", price_tjs)), 2)
+        if u["balance"] < price:
+            return web.json_response({"message": "insufficient_balance"}, status=402)
+
+        # Блокировка двойного заказа
+        async with user_locks[uid]:
+            # Списываем баланс
+            u["balance"] = round(u["balance"] - price, 2)
+            add_transaction(uid_int, -price, "order", ptitle(product, "ru"))
+            save_db()
+
+            oid = str(uuid.uuid4())[:8].upper()
+            ts = now_ts()
+
+            # Размещаем заказ через Donatix API
+            order_status = "processing"
+            order_error  = ""
+            try:
+                fields = {"player_id": player_id}
+                # Для Premium нужен username
+                if product.get("kind") == "telegram_premium" or product_id.startswith("tg_prem"):
+                    fields = {"username": player_id}
+                
+                async with aiohttp.ClientSession() as sess:
+                    async with sess.post(
+                        f"{API}/orders",
+                        json={"product_id": product_id, "quantity": 1, "fields": fields},
+                        headers={**HEADERS, "Content-Type": "application/json"},
+                        timeout=aiohttp.ClientTimeout(total=30)
+                    ) as r:
+                        resp = await r.json(content_type=None)
+
+                if resp.get("status") in ("success", "completed", "processing", "pending"):
+                    order_status = "done" if resp.get("status") in ("success","completed") else "processing"
+                else:
+                    raise Exception(resp.get("message") or resp.get("error") or "API error")
+
+            except asyncio.TimeoutError:
+                order_status = "uncertain"
+            except Exception as err:
+                order_error = str(err)
+                # Возвращаем деньги при ошибке
+                u["balance"] = round(u["balance"] + price, 2)
+                add_transaction(uid_int, +price, "refund", "Возврат: " + str(err)[:40])
+                save_db()
+                return web.json_response({"message": order_error}, status=500)
+
+            # Сохраняем заказ
+            order = {
+                "oid":        oid,
+                "uid":        uid,
+                "product_id": product_id,
+                "title":      ptitle(product, "ru"),
+                "player_id":  player_id,
+                "price":      price,
+                "status":     order_status,
+                "ts":         ts,
+            }
+            db["orders"].append(order)
+            save_db()
+
+            # Уведомление админу
+            await notify_admin(
+                f"🌐 <b>Mini App заказ</b> #{oid}\n"
+                f"👤 ID {uid} · {u.get('name','')} · @{u.get('username','')}\n"
+                f"📦 {ptitle(product,'ru')}\n"
+                f"🆔 {player_id}\n"
+                f"💰 {price} TJS\n"
+                f"📊 {order_status}"
+            )
+
+            return web.json_response({
+                "ok":      True,
+                "order_id": oid,
+                "balance":  round(u["balance"], 2),
+                "status":   order_status,
+            })
+
+    except Exception as e:
+        log.error("h_webapp_order: %s", e)
+        return web.json_response({"message": str(e)}, status=500)
+
+
+async def h_webapp_orders(request: web.Request) -> web.Response:
+    """
+    GET /webapp/api/orders
+    Headers: X-TG-Init-Data
+    Response: { orders: [...] }
+    """
+    try:
+        init_data = request.headers.get("X-TG-Init-Data", "")
+        tg_user = verify_tg_initdata(init_data, BOT_TOKEN)
+        if tg_user is None and not os.environ.get("DEV_MODE"):
+            return web.json_response({"message": "Unauthorized"}, status=401)
+        if tg_user is None:
+            pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+            tg_user = json.loads(pairs.get("user", "{}"))
+
+        uid = str(tg_user.get("id", ""))
+        mine = [o for o in db["orders"] if str(o.get("uid")) == uid]
+        mine = sorted(mine, key=lambda x: x.get("ts", 0), reverse=True)[:20]
+
+        return web.json_response({"orders": [{
+            "oid":    o.get("oid", "—"),
+            "title":  o.get("title", "Заказ"),
+            "status": o.get("status", "processing"),
+            "ts":     o.get("ts", 0),
+            "price":  round(float(o.get("price", 0)), 2),
+        } for o in mine]})
+    except Exception as e:
+        log.error("h_webapp_orders: %s", e)
+        return web.json_response({"message": str(e)}, status=500)
+
+
+async def h_webapp_topup(request: web.Request) -> web.Response:
+    """
+    POST /webapp/api/topup
+    Body: { method: 'dc'|'alif', amount: float }
+    Отправляет инструкции пополнения в Telegram чат пользователя.
+    """
+    try:
+        init_data = request.headers.get("X-TG-Init-Data", "")
+        body = await request.json()
+
+        tg_user = verify_tg_initdata(init_data, BOT_TOKEN)
+        if tg_user is None and not os.environ.get("DEV_MODE"):
+            return web.json_response({"message": "Unauthorized"}, status=401)
+        if tg_user is None:
+            pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+            tg_user = json.loads(pairs.get("user", "{}"))
+
+        uid_int = int(tg_user.get("id", 0))
+        method  = body.get("method", "dc")
+        amount  = float(body.get("amount", 0))
+
+        if amount < 2 or amount > 5000:
+            return web.json_response({"message": "Недопустимая сумма"}, status=400)
+
+        pm = PAY_METHODS.get(method)
+        if not pm:
+            return web.json_response({"message": "Способ оплаты недоступен"}, status=400)
+
+        holder_line = f" ({pm['holder']})" if pm.get("holder") else ""
+        instr = (
+            f"💳 <b>{pm['title']}</b>\n\n"
+            f"1️⃣ Переведите на: <code>{pm['number']}</code>{holder_line}\n"
+            f"💵 Сумма: <b>{amount:.2f} TJS</b>\n\n"
+            f"2️⃣ Отправьте фото чека здесь 📸\n"
+            f"Администратор зачислит сумму на баланс.\n\n"
+            f"<i>❗ Не отправляйте один чек дважды.</i>"
+        )
+
+        # Если запрос через DC Pay URL
+        if method == "dc" and DC_PAY_URL:
+            pay_link = payment_url("dc", amount)
+            if pay_link:
+                from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+                markup = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="🏙 Оплатить через DC", url=pay_link)
+                ]])
+                try:
+                    await bot.send_message(uid_int, instr, reply_markup=markup)
+                except Exception:
+                    await bot.send_message(uid_int, instr)
+            else:
+                await bot.send_message(uid_int, instr)
+        else:
+            await bot.send_message(uid_int, instr)
+
+        # Переводим пользователя в состояние ожидания чека
+        user_state[uid_int] = {
+            "stage": "topup_receipt",
+            "method": method,
+            "amount": amount,
+        }
+
+        return web.json_response({"ok": True})
+
+    except Exception as e:
+        log.error("h_webapp_topup: %s", e)
+        return web.json_response({"message": str(e)}, status=500)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  КАК ДОБАВИТЬ МАРШРУТЫ В main()
+# ═══════════════════════════════════════════════════════════════════
+#
+#  В функции async def main() найдите app.add_routes([...])
+#  и добавьте эти строки:
+#
+#  app.add_routes([
+#      web.get("/",                          h_health),
+#      web.post("/webapp/api/web_login",     h_web_login),
+#
+#      # ──── Mini App маршруты ────
+#      web.get("/webapp/",                   h_miniapp_html),   # ← HTML страница
+#      web.get("/webapp",                    h_miniapp_html),
+#      web.post("/webapp/api/init",          h_webapp_init),
+#      web.get("/webapp/api/catalog",        h_webapp_catalog),
+#      web.get("/webapp/api/nick",           h_webapp_nick),
+#      web.post("/webapp/api/order",         h_webapp_order),
+#      web.get("/webapp/api/orders",         h_webapp_orders),
+#      web.post("/webapp/api/topup",         h_webapp_topup),
+#  ])
+#
+# ═══════════════════════════════════════════════════════════════════
+#  КАК ДОБАВИТЬ КНОПКУ MINI APP В БОТА
+# ═══════════════════════════════════════════════════════════════════
+#
+#  В функции send_menu() добавьте кнопку WebApp в rows:
+#
+#  from aiogram.types import WebAppInfo
+#  MINIAPP_URL = EXTERNAL_URL + "/webapp/"
+#
+#  rows.insert(0, [InlineKeyboardButton(
+#      text="⚡ Открыть DONATEX Mini App",
+#      web_app=WebAppInfo(url=MINIAPP_URL)
+#  )])
+#
+# ═══════════════════════════════════════════════════════════════════
+#  ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ (Render.com)
+# ═══════════════════════════════════════════════════════════════════
+#
+#  DEV_MODE=1   — отключает проверку подписи (только для разработки!)
+#
+# ═══════════════════════════════════════════════════════════════════
 
 async def main():
     await init_db()
     app = web.Application(client_max_size=6 * 1024 * 1024)
     app.add_routes([
-        web.get("/",                             h_health),
-        web.post("/webapp/api/web_login",        h_web_login),   # ← сайт Chrome
-    ])
+    web.get("/",                          h_health),
+    web.post("/webapp/api/web_login",     h_web_login),
+    web.get("/webapp/",                   h_miniapp_html),
+    web.get("/webapp",                    h_miniapp_html),
+    web.post("/webapp/api/init",          h_webapp_init),
+    web.get("/webapp/api/catalog",        h_webapp_catalog),
+    web.get("/webapp/api/nick",           h_webapp_nick),
+    web.post("/webapp/api/order",         h_webapp_order),
+    web.get("/webapp/api/orders",         h_webapp_orders),
+    web.post("/webapp/api/topup",         h_webapp_topup),
+])
 
     # ── CORS: разрешаем запросы с любого сайта ──────────────────────────
     try:
