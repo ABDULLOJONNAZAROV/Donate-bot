@@ -3,3 +3,4 @@ aiohttp>=3.9
 asyncpg>=0.29
 aiohttp-cors>=0.7.0
 reportlab>=4.0
+pip install Pillow.
